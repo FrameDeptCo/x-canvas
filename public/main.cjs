@@ -387,7 +387,14 @@ ipcMain.handle("fetch-bookmarks", async (_, cookie) => {
       }
     }
 
-    console.log("[Electron] Total bookmarks found:", bookmarks.length);
+    // Deduplicate by id (pages can sometimes overlap by 1)
+    const seen = new Set();
+    bookmarks = bookmarks.filter(b => {
+      if (seen.has(b.id)) return false;
+      seen.add(b.id);
+      return true;
+    });
+    console.log("[Electron] Total bookmarks found (deduplicated):", bookmarks.length);
 
     // Try to fetch user's lists/collections
     let collections = [
@@ -442,120 +449,168 @@ function extractCt0FromString(cookie) {
   return match ? match[1] : "";
 }
 
+const GRAPHQL_FEATURES = {
+  responsive_web_graphql_exclude_directive_enabled: true,
+  verified_phone_label_enabled: false,
+  creator_subscriptions_tweet_preview_api_enabled: true,
+  responsive_web_graphql_timeline_navigation_enabled: true,
+  responsive_web_graphql_skip_user_profile_image_extensions_enabled: false,
+  tweetypie_unmention_optimization_enabled: true,
+  responsive_web_edit_tweet_api_enabled: true,
+  graphql_is_translatable_rweb_tweet_is_translatable_enabled: true,
+  view_counts_everywhere_api_enabled: true,
+  longform_notetweets_consumption_enabled: true,
+  tweet_awards_web_tipping_enabled: false,
+  freedom_of_speech_not_reach_fetch_enabled: true,
+  standardized_nudges_misinfo: true,
+  tweet_with_visibility_results_has_subtext_notes_enabled: false,
+  longform_notetweets_rich_text_read_enabled: true,
+  longform_notetweets_inline_media_enabled: true,
+  responsive_web_enhance_cards_enabled: false,
+  responsive_web_twitter_article_tweet_consumption_enabled: true,
+  communities_web_enable_tweet_community_results_fetch: true,
+  articles_preview_enabled: true,
+};
+
 async function fetchBookmarksGraphQL(sess, queryId, cookieStr, ct0, bearerToken) {
-  const body = {
-    variables: {
-      count: 100,
-      includePromotedContent: false,
-      withBirdwatchNotes: false,
-      withClientEventToken: false,
-      withVoice: true,
-      withV2Timeline: true,
-      cursor: null,
-    },
-    features: {
-      responsive_web_graphql_exclude_directive_enabled: true,
-      verified_phone_label_enabled: false,
-      creator_subscriptions_tweet_preview_api_enabled: true,
-      responsive_web_graphql_timeline_navigation_enabled: true,
-      responsive_web_graphql_skip_user_profile_image_extensions_enabled: false,
-      tweetypie_unmention_optimization_enabled: true,
-      responsive_web_edit_tweet_api_enabled: true,
-      graphql_is_translatable_rweb_tweet_is_translatable_enabled: true,
-      view_counts_everywhere_api_enabled: true,
-      longform_notetweets_consumption_enabled: true,
-      tweet_awards_web_tipping_enabled: false,
-      freedom_of_speech_not_reach_fetch_enabled: true,
-      standardized_nudges_misinfo: true,
-      tweet_with_visibility_results_has_subtext_notes_enabled: false,
-      longform_notetweets_rich_text_read_enabled: true,
-      longform_notetweets_inline_media_enabled: true,
-      responsive_web_enhance_cards_enabled: false,
-      responsive_web_twitter_article_tweet_consumption_enabled: true,
-      communities_web_enable_tweet_community_results_fetch: true,
-      articles_preview_enabled: true,
-    },
+  const url = `https://x.com/i/api/graphql/${queryId}/Bookmarks`;
+  const headers = {
+    authorization: bearerToken,
+    "x-csrf-token": ct0,
+    "x-twitter-active-user": "yes",
+    "x-twitter-auth-type": "OAuth2Session",
+    "x-twitter-client-language": "en",
+    cookie: cookieStr,
+    "content-type": "application/json",
+    referer: "https://x.com/i/bookmarks",
+    origin: "https://x.com",
+    accept: "*/*",
+    "accept-language": "en-US,en;q=0.9",
+    "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
   };
 
-  const url = `https://x.com/i/api/graphql/${queryId}/Bookmarks`;
-  console.log(`[Electron] POST GraphQL: ${url}`);
+  const allBookmarks = [];
+  let cursor = null;
+  let page = 0;
+  const MAX_PAGES = 20; // safety cap — 20 pages × ~20 tweets = up to 400 bookmarks
 
-  const response = await sess.fetch(url, {
-    method: "POST",
-    headers: {
-      authorization: bearerToken,
-      "x-csrf-token": ct0,
-      "x-twitter-active-user": "yes",
-      "x-twitter-auth-type": "OAuth2Session",
-      "x-twitter-client-language": "en",
-      cookie: cookieStr,
-      "content-type": "application/json",
-      referer: "https://x.com/i/bookmarks",
-      origin: "https://x.com",
-      accept: "*/*",
-      "accept-language": "en-US,en;q=0.9",
-      "user-agent":
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    },
-    body: JSON.stringify(body),
-  });
+  while (page < MAX_PAGES) {
+    page++;
+    const body = {
+      variables: {
+        count: 20,
+        cursor: cursor,         // null on first page, token on subsequent pages
+        includePromotedContent: false,
+        withBirdwatchNotes: false,
+        withClientEventToken: false,
+        withVoice: true,
+        withV2Timeline: true,
+      },
+      features: GRAPHQL_FEATURES,
+    };
 
-  console.log(`[Electron] GraphQL response status: ${response.status}`);
+    console.log(`[Electron] Fetching bookmarks page ${page}, cursor=${cursor ? cursor.substring(0, 30) + "…" : "null"}`);
 
-  if (!response.ok) {
+    const response = await sess.fetch(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(body),
+    });
+
+    console.log(`[Electron] Page ${page} status: ${response.status}`);
+
+    if (!response.ok) {
+      const text = await response.text();
+      console.error(`[Electron] Page ${page} error:`, text.substring(0, 300));
+      throw new Error(`HTTP ${response.status}: ${text.substring(0, 200)}`);
+    }
+
     const text = await response.text();
-    console.error(`[Electron] GraphQL error body:`, text.substring(0, 500));
-    throw new Error(`HTTP ${response.status}: ${text.substring(0, 200)}`);
+    const data = JSON.parse(text);
+
+    const { bookmarks: pageBMs, nextCursor } = parseGraphQLBookmarks(data, allBookmarks.length);
+    console.log(`[Electron] Page ${page}: got ${pageBMs.length} bookmarks, nextCursor=${nextCursor ? "yes" : "no"}`);
+
+    allBookmarks.push(...pageBMs);
+
+    // Stop if no more pages, no results on this page, or cursor unchanged
+    if (!nextCursor || pageBMs.length === 0 || nextCursor === cursor) {
+      console.log(`[Electron] Pagination complete after ${page} pages, total=${allBookmarks.length}`);
+      break;
+    }
+
+    cursor = nextCursor;
+
+    // Small delay between pages to avoid rate limiting
+    await new Promise(r => setTimeout(r, 300));
   }
 
-  const text = await response.text();
-  console.log(`[Electron] GraphQL response length: ${text.length}, preview: ${text.substring(0, 200)}`);
-  const data = JSON.parse(text);
-  return parseGraphQLBookmarks(data);
+  return allBookmarks;
 }
 
 async function fetchBookmarksV2(sess, cookieStr, ct0, bearerToken) {
-  const url = "https://x.com/i/api/2/timeline/bookmark.json?count=100";
+  const headers = {
+    authorization: bearerToken,
+    "x-csrf-token": ct0,
+    "x-twitter-active-user": "yes",
+    "x-twitter-auth-type": "OAuth2Session",
+    cookie: cookieStr,
+    referer: "https://x.com/i/bookmarks",
+    origin: "https://x.com",
+    accept: "application/json",
+    "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+  };
 
-  console.log("[Electron] Calling v2 API:", url);
+  const allBookmarks = [];
+  let maxId = null;
+  let page = 0;
+  const MAX_PAGES = 20;
 
-  const response = await sess.fetch(url, {
-    headers: {
-      authorization: bearerToken,
-      "x-csrf-token": ct0,
-      "x-twitter-active-user": "yes",
-      "x-twitter-auth-type": "OAuth2Session",
-      cookie: cookieStr,
-      referer: "https://x.com/i/bookmarks",
-      origin: "https://x.com",
-      accept: "application/json",
-      "user-agent":
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    },
-  });
+  while (page < MAX_PAGES) {
+    page++;
+    const params = new URLSearchParams({ count: "200" });
+    if (maxId) params.set("max_id", maxId);
+    const url = `https://x.com/i/api/2/timeline/bookmark.json?${params}`;
 
-  console.log(`[Electron] v2 API response status: ${response.status}`);
+    console.log(`[Electron] v2 page ${page}: ${url}`);
+    const response = await sess.fetch(url, { headers });
+    console.log(`[Electron] v2 page ${page} status: ${response.status}`);
 
-  const text = await response.text();
-  console.log(`[Electron] v2 response length: ${text.length}, preview: ${text.substring(0, 300)}`);
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`HTTP ${response.status}: ${text.substring(0, 200)}`);
+    }
 
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status}: ${text.substring(0, 200)}`);
+    const text = await response.text();
+    if (!text || text.trim() === "") throw new Error("Empty response body");
+
+    const data = JSON.parse(text);
+    const pageBMs = parseV2Bookmarks(data, allBookmarks.length);
+    console.log(`[Electron] v2 page ${page}: got ${pageBMs.length} bookmarks`);
+
+    allBookmarks.push(...pageBMs);
+
+    // v2 paginates via max_id — set to lowest tweet id minus 1
+    if (pageBMs.length === 0) break;
+    const lowestId = pageBMs.reduce((min, b) => {
+      const n = BigInt(b.id);
+      return n < min ? n : min;
+    }, BigInt(pageBMs[0].id));
+    const nextMaxId = (lowestId - 1n).toString();
+    if (nextMaxId === maxId) break;
+    maxId = nextMaxId;
+
+    await new Promise(r => setTimeout(r, 300));
   }
 
-  if (!text || text.trim() === "") {
-    throw new Error("Empty response body");
-  }
-
-  const data = JSON.parse(text);
-  return parseV2Bookmarks(data);
+  return allBookmarks;
 }
 
 function parseGraphQLBookmarks(data, startIdx = 0) {
   const bookmarks = [];
-  try {
-    console.log("[Electron] Parsing GraphQL response, top-level keys:", Object.keys(data?.data || {}));
+  let nextCursor = null;
 
+  try {
     // Try all known response structures
     const timeline =
       data?.data?.bookmark_timeline_v2?.timeline ||
@@ -564,21 +619,32 @@ function parseGraphQLBookmarks(data, startIdx = 0) {
       data?.data?.user?.result?.timeline_v2?.timeline;
 
     if (!timeline) {
-      console.log("[Electron] No timeline found. Full response:", JSON.stringify(data).substring(0, 800));
-      return bookmarks;
+      console.log("[Electron] No timeline found. Response keys:", Object.keys(data?.data || {}).join(", "));
+      return { bookmarks, nextCursor };
     }
 
     const instructions = timeline.instructions || [];
-    console.log(`[Electron] Found ${instructions.length} instructions`);
 
     for (const instruction of instructions) {
-      const entries = instruction.entries || instruction.entry ? [instruction.entry] : [];
       const allEntries = instruction.entries || [];
-      console.log(`[Electron] Instruction type=${instruction.type}, entries=${allEntries.length}`);
 
       for (const entry of allEntries) {
+        // ── Cursor entries (for pagination) ────────────────────────────────
+        if (entry?.content?.entryType === "TimelineTimelineCursor" ||
+            entry?.content?.__typename === "TimelineTimelineCursor") {
+          if (entry.content.cursorType === "Bottom" || entry.entryId?.includes("cursor-bottom")) {
+            nextCursor = entry.content.value;
+          }
+          continue;
+        }
+        // Also catch cursor in entryId format
+        if (entry?.entryId?.startsWith("cursor-bottom")) {
+          nextCursor = entry?.content?.value;
+          continue;
+        }
+
         try {
-          // Handle module items (grouped tweets)
+          // ── Tweet entries ───────────────────────────────────────────────
           const moduleItems = entry?.content?.items;
           const singleItem = entry?.content?.itemContent;
 
@@ -605,42 +671,26 @@ function parseGraphQLBookmarks(data, startIdx = 0) {
             const legacy = tweetData?.legacy;
             if (!legacy) continue;
 
-            // Try every known path for user data
             const userResult =
               tweetData?.core?.user_results?.result ||
               tweetResult?.core?.user_results?.result;
 
-            // userResult may itself be wrapped (UserUnavailable etc.)
             const userLegacy =
               userResult?.__typename === "User"
                 ? userResult.legacy
                 : userResult?.legacy || userResult;
 
-            const screenName =
-              userLegacy?.screen_name ||
-              userResult?.screen_name ||
-              "";
+            const screenName = userLegacy?.screen_name || userResult?.screen_name || "";
+            const displayName = userLegacy?.name || userResult?.name || screenName || "Unknown";
 
-            const displayName =
-              userLegacy?.name ||
-              userResult?.name ||
-              screenName ||
-              "Unknown";
-
-            const mediaEntities =
-              legacy.extended_entities?.media ||
-              legacy.entities?.media ||
-              [];
+            const mediaEntities = legacy.extended_entities?.media || legacy.entities?.media || [];
             const firstMedia = mediaEntities[0] || null;
             const thumbnail = firstMedia?.media_url_https || null;
 
-            // Extract video URL for animated GIFs and videos
             let videoUrl = null;
-            if (firstMedia && (firstMedia.type === 'video' || firstMedia.type === 'animated_gif')) {
-              const variants = firstMedia.video_info?.variants || [];
-              const mp4s = variants.filter(v => v.content_type === 'video/mp4');
+            if (firstMedia && (firstMedia.type === "video" || firstMedia.type === "animated_gif")) {
+              const mp4s = (firstMedia.video_info?.variants || []).filter(v => v.content_type === "video/mp4");
               if (mp4s.length > 0) {
-                // Pick highest bitrate
                 mp4s.sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0));
                 videoUrl = mp4s[0].url;
               }
@@ -656,7 +706,7 @@ function parseGraphQLBookmarks(data, startIdx = 0) {
               videoUrl,
               createdAt: legacy.created_at || new Date().toISOString(),
               url: `https://x.com/${screenName || "i/web"}/status/${legacy.id_str}`,
-              position: { x: 0, y: 0 },   // syncManager computes masonry positions
+              position: { x: 0, y: 0 },
               folderId: "default",
             });
           }
@@ -669,11 +719,10 @@ function parseGraphQLBookmarks(data, startIdx = 0) {
     console.error("[Electron] Error parsing GraphQL response:", e.message, e.stack);
   }
 
-  console.log(`[Electron] Parsed ${bookmarks.length} bookmarks from GraphQL`);
-  return bookmarks;
+  return { bookmarks, nextCursor };
 }
 
-function parseV2Bookmarks(data) {
+function parseV2Bookmarks(data, startIdx = 0) {
   const bookmarks = [];
   try {
     const tweets = data?.globalObjects?.tweets || {};
@@ -681,20 +730,29 @@ function parseV2Bookmarks(data) {
 
     for (const [tweetId, tweet] of Object.entries(tweets)) {
       const user = users[tweet.user_id_str] || {};
-      const idx = bookmarks.length;
+      // Extract media
+      const mediaEntities = tweet.extended_entities?.media || tweet.entities?.media || [];
+      const firstMedia = mediaEntities[0] || null;
+      const thumbnail = firstMedia?.media_url_https || null;
+      let videoUrl = null;
+      if (firstMedia && (firstMedia.type === "video" || firstMedia.type === "animated_gif")) {
+        const mp4s = (firstMedia.video_info?.variants || []).filter(v => v.content_type === "video/mp4");
+        if (mp4s.length > 0) {
+          mp4s.sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0));
+          videoUrl = mp4s[0].url;
+        }
+      }
       bookmarks.push({
         id: tweetId,
         text: tweet.full_text || tweet.text || "",
         author: user.screen_name || "unknown",
         authorName: user.name || "Unknown",
         authorImage: user.profile_image_url_https || null,
-        thumbnail: null,
+        thumbnail,
+        videoUrl,
         createdAt: tweet.created_at || new Date().toISOString(),
         url: `https://x.com/${user.screen_name || "i/web"}/status/${tweetId}`,
-        position: {
-          x: (idx % 5) * 380 + 50,
-          y: Math.floor(idx / 5) * 250 + 50,
-        },
+        position: { x: 0, y: 0 },
         folderId: "default",
       });
     }
