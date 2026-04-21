@@ -742,6 +742,10 @@ function parseGraphQLBookmarks(data, startIdx = 0) {
               position: { x: 0, y: 0 },
               folderId: "default",
             });
+
+            if (!thumbnail && !videoUrl) {
+              console.log(`[Electron] MISSING MEDIA: @${screenName} - "${(legacy.full_text || "").substring(0, 50)}..." (media count: ${mediaEntities.length})`);
+            }
           }
         } catch (entryErr) {
           console.error("[Electron] Error parsing entry:", entryErr.message);
