@@ -378,47 +378,46 @@ async function discoverQueryId(sess, cookieStr, bearerToken) {
 }
 
 ipcMain.handle("fetch-bookmarks", async (_, cookie) => {
-  console.log("[Electron] Fetching bookmarks — primary: CDP page capture");
+  console.log("[Electron] Fetching bookmarks — using GraphQL pagination (primary method)");
 
   try {
     const sess = mainWindow
       ? mainWindow.webContents.session
       : electronSession.defaultSession;
 
-    // ── STEP 1: CDP capture (most reliable — uses X.com's own JS + scrolls) ─
-    let bookmarks = await captureAllBookmarksViaCDP(sess);
-    console.log(`[Electron] CDP capture returned ${bookmarks.length} bookmarks`);
+    // ── STEP 1: GraphQL pagination (deterministic, gets ALL bookmarks) ──────
+    const sessionCookies = await sess.cookies.get({ url: "https://x.com" });
+    const ct0 = sessionCookies.find(c => c.name === "ct0")?.value || extractCt0FromString(cookie);
+    const cookieStr = sessionCookies.length > 0
+      ? sessionCookies.map(c => `${c.name}=${c.value}`).join("; ")
+      : cookie || "";
 
-    // ── STEP 2: Fallback — manual GraphQL pagination if CDP got < 10 ────────
-    if (bookmarks.length < 10) {
-      console.log("[Electron] CDP got too few, falling back to manual GraphQL pagination...");
+    const bearerToken = capturedBearerToken ||
+      "Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA";
 
-      const sessionCookies = await sess.cookies.get({ url: "https://x.com" });
-      const ct0 = sessionCookies.find(c => c.name === "ct0")?.value || extractCt0FromString(cookie);
-      const cookieStr = sessionCookies.length > 0
-        ? sessionCookies.map(c => `${c.name}=${c.value}`).join("; ")
-        : cookie || "";
+    const discoveredId = await discoverQueryId(sess, cookieStr, bearerToken);
+    const queryIds = [capturedQueryId, discoveredId,
+      "Fy0QMy4q_aZCpkO0PnyLYw", "HuTx74BxAnezK1D2HLp9-A", "Uv_m_cBXJL1lVXcgX0-u8Q",
+    ].filter(Boolean);
 
-      const bearerToken = capturedBearerToken ||
-        "Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA";
-
-      const discoveredId = await discoverQueryId(sess, cookieStr, bearerToken);
-      const queryIds = [capturedQueryId, discoveredId,
-        "Fy0QMy4q_aZCpkO0PnyLYw", "HuTx74BxAnezK1D2HLp9-A", "Uv_m_cBXJL1lVXcgX0-u8Q",
-      ].filter(Boolean);
-
-      for (const queryId of queryIds) {
-        try {
-          const gqlBMs = await fetchBookmarksGraphQL(sess, queryId, cookieStr, ct0, bearerToken);
-          if (gqlBMs.length > bookmarks.length) {
-            bookmarks = gqlBMs;
-            console.log(`[Electron] Fallback GraphQL got ${bookmarks.length} bookmarks`);
-            break;
-          }
-        } catch (e) {
-          console.log(`[Electron] Fallback queryId=${queryId} failed:`, e.message);
+    let bookmarks = [];
+    for (const queryId of queryIds) {
+      try {
+        bookmarks = await fetchBookmarksGraphQL(sess, queryId, cookieStr, ct0, bearerToken);
+        if (bookmarks.length > 0) {
+          console.log(`[Electron] GraphQL pagination got ${bookmarks.length} bookmarks`);
+          break;
         }
+      } catch (e) {
+        console.log(`[Electron] GraphQL queryId=${queryId} failed:`, e.message);
       }
+    }
+
+    // ── STEP 2: Fallback — CDP capture if GraphQL failed completely ────────
+    if (bookmarks.length === 0) {
+      console.log("[Electron] GraphQL got no bookmarks, falling back to CDP page capture...");
+      bookmarks = await captureAllBookmarksViaCDP(sess);
+      console.log(`[Electron] CDP capture returned ${bookmarks.length} bookmarks`);
     }
 
     // Deduplicate
@@ -526,13 +525,13 @@ async function fetchBookmarksGraphQL(sess, queryId, cookieStr, ct0, bearerToken)
   const allBookmarks = [];
   let cursor = null;
   let page = 0;
-  const MAX_PAGES = 20; // safety cap — 20 pages × ~20 tweets = up to 400 bookmarks
+  const MAX_PAGES = 100; // safety cap — 100 pages × 100 tweets = up to 10,000 bookmarks
 
   while (page < MAX_PAGES) {
     page++;
     const body = {
       variables: {
-        count: 20,
+        count: 100,
         cursor: cursor,         // null on first page, token on subsequent pages
         includePromotedContent: false,
         withBirdwatchNotes: false,
@@ -543,7 +542,7 @@ async function fetchBookmarksGraphQL(sess, queryId, cookieStr, ct0, bearerToken)
       features: GRAPHQL_FEATURES,
     };
 
-    console.log(`[Electron] Fetching bookmarks page ${page}, cursor=${cursor ? cursor.substring(0, 30) + "…" : "null"}`);
+    console.log(`[Electron] Fetching bookmarks page ${page} (count=100), cursor=${cursor ? cursor.substring(0, 30) + "…" : "null"}`);
 
     const response = await sess.fetch(url, {
       method: "POST",

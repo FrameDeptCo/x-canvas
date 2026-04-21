@@ -31,7 +31,9 @@
       "Bash(taskkill /F /IM electron.exe)",
       "Bash(taskkill /F /IM \"Electron.exe\")",
       "WebFetch(domain:github.com)",
-      "WebFetch(domain:raw.githubusercontent.com)"
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(git add *)",
+      "Bash(git commit *)"
     ]
   }
 }
