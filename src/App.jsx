@@ -61,6 +61,11 @@ function App() {
     setFolders(flds)
     setBookmarks_(bms)
     setFolders_(flds)
+
+    // Auto-arrange 3 seconds later when images have loaded and reported aspect ratios
+    setTimeout(() => {
+      handleArrange()
+    }, 3000)
   }
 
   // ── Reset / arrange all bookmarks back into the masonry grid ─────────────
@@ -93,6 +98,7 @@ function App() {
         onSync={handleSync}
         onLogin={() => setShowLogin(true)}
         onArrange={handleArrange}
+        panelOpen={panelOpen}
       />
 
       {/* Canvas + panel side-by-side */}

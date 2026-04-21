@@ -77,6 +77,18 @@ const InfiniteCanvas = ({ bookmarks, panelOpen }) => {
     return () => el?.removeEventListener('wheel', onWheel)
   }, [canvasZoom, canvasPan, setCanvasZoom, setCanvasPan])
 
+  // ── Zoom slider change (zoom from viewport center) ──────────────────────
+  // Called from Header when user moves the zoom slider
+  const handleSliderZoom = (newZoom) => {
+    const cx = winSize.width / 2
+    const cy = winSize.height / 2
+    setCanvasPan({
+      x: cx - (cx - canvasPan.x) * (newZoom / canvasZoom),
+      y: cy - (cy - canvasPan.y) * (newZoom / canvasZoom),
+    })
+    setCanvasZoom(newZoom)
+  }
+
   // ── Pan on stage drag ─────────────────────────────────────────────────────
   const onMouseDown = (e) => {
     if (e.target !== stageRef.current) return   // only empty canvas

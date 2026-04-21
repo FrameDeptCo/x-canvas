@@ -19,16 +19,17 @@ const FILTER_CHIPS = [
   { id: 'types',  label: 'Types',  icon: <span className="chip-icon">≡</span> },
 ]
 
-export default function Header({ folders, onSync, onLogin, onArrange }) {
+export default function Header({ folders, onSync, onLogin, onArrange, panelOpen }) {
   const [syncStatus, setSyncStatus] = useState('')
   const [isSyncing,  setIsSyncing]  = useState(false)
   const [search,     setSearch]     = useState('')
   const [activeChip, setActiveChip] = useState(null)
 
-  const canvasZoom    = useAppStore(s => s.canvasZoom)
-  const setCanvasZoom = useAppStore(s => s.setCanvasZoom)
-  const selectedFolder    = useAppStore(s => s.selectedFolder)
-  const setSelectedFolder = useAppStore(s => s.setSelectedFolder)
+  const canvasZoom           = useAppStore(s => s.canvasZoom)
+  const setCanvasZoom        = useAppStore(s => s.setCanvasZoom)
+  const setCanvasZoomCentered = useAppStore(s => s.setCanvasZoomCentered)
+  const selectedFolder       = useAppStore(s => s.selectedFolder)
+  const setSelectedFolder    = useAppStore(s => s.setSelectedFolder)
 
   const handleSync = async () => {
     setIsSyncing(true)
@@ -45,15 +46,29 @@ export default function Header({ folders, onSync, onLogin, onArrange }) {
     }
   }
 
-  // Zoom: slider maps 0–100 → zoom 0.25–2.0
+  // Zoom: slider maps 0–100 → zoom 0.25–2.0 (from viewport center)
+  const HEADER_H = 74
   const sliderVal = Math.round(((canvasZoom - 0.25) / 1.75) * 100)
   const onSlider  = (e) => {
     const pct  = Number(e.target.value) / 100
     const zoom = 0.25 + pct * 1.75
-    setCanvasZoom(Math.round(zoom * 100) / 100)
+    const newZoom = Math.round(zoom * 100) / 100
+    const vw = window.innerWidth - (panelOpen ? 280 : 0)
+    const vh = window.innerHeight - HEADER_H
+    setCanvasZoomCentered(newZoom, vw, vh)
   }
-  const zoomIn  = () => setCanvasZoom(Math.min(5,   Math.round((canvasZoom + 0.15) * 100) / 100))
-  const zoomOut = () => setCanvasZoom(Math.max(0.15, Math.round((canvasZoom - 0.15) * 100) / 100))
+  const zoomIn  = () => {
+    const newZoom = Math.min(5, Math.round((canvasZoom + 0.15) * 100) / 100)
+    const vw = window.innerWidth - (panelOpen ? 280 : 0)
+    const vh = window.innerHeight - HEADER_H
+    setCanvasZoomCentered(newZoom, vw, vh)
+  }
+  const zoomOut = () => {
+    const newZoom = Math.max(0.15, Math.round((canvasZoom - 0.15) * 100) / 100)
+    const vw = window.innerWidth - (panelOpen ? 280 : 0)
+    const vh = window.innerHeight - HEADER_H
+    setCanvasZoomCentered(newZoom, vw, vh)
+  }
 
   // Folder filter chip
   const handleChip = (chipId) => {

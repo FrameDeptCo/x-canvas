@@ -21,6 +21,16 @@ export const useAppStore = create((set) => ({
   canvasPan:  { x: 0, y: 0 },
   setCanvasZoom: (z) => set({ canvasZoom: z }),
   setCanvasPan:  (p) => set({ canvasPan: p }),
+  // Zoom from viewport center (used by slider)
+  setCanvasZoomCentered: (newZoom, viewportW, viewportH) => set(s => {
+    const cx = viewportW / 2
+    const cy = viewportH / 2
+    const newPan = {
+      x: cx - (cx - s.canvasPan.x) * (newZoom / s.canvasZoom),
+      y: cy - (cy - s.canvasPan.y) * (newZoom / s.canvasZoom),
+    }
+    return { canvasZoom: newZoom, canvasPan: newPan }
+  }),
 
   // Selected bookmark → info panel
   selectedBookmark: null,

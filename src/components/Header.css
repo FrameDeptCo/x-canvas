@@ -52,10 +52,12 @@
   background: transparent;
   border: none;
   color: #666;
-  padding: 4px;
+  padding: 3px 4px;
   cursor: pointer;
   display: flex;
   align-items: center;
+  justify-content: center;
+  height: 18px;
   border-radius: 3px;
   transition: color 100ms;
   flex-shrink: 0;
@@ -66,6 +68,9 @@
 .zoom-track {
   width: 140px;
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  height: 18px;
 }
 
 .zoom-slider {
