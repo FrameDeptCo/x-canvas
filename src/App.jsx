@@ -107,8 +107,32 @@ function App() {
   // ── Manual reset grid button ──────────────────────────────────────────────
   const handleArrange = () => {
     lastArrangedCountRef.current = 0
-    bumpGridResetKey()  // forces every BookmarkCard to re-read its position
+    bumpGridResetKey()
     arrangeNow(aspectRatios)
+  }
+
+  // ── Remix: shuffle order, repack into grid ────────────────────────────────
+  const handleRemix = async () => {
+    try {
+      const allBms = await getLocalBookmarks()
+      const bms = allBms.filter(b => b.thumbnail || b.videoUrl)
+      // Fisher-Yates shuffle
+      for (let i = bms.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [bms[i], bms[j]] = [bms[j], bms[i]]
+      }
+      const panelW = panelOpen ? 280 : 0
+      const vw = window.innerWidth - panelW
+      const arranged = computeMasonryPositions(bms, vw, aspectRatios)
+      await saveBookmarks(arranged)
+      const posMap = Object.fromEntries(arranged.map(b => [b.id, b.position]))
+      const merged = allBms.map(b => posMap[b.id] ? { ...b, position: posMap[b.id] } : b)
+      setBookmarks(merged)
+      setBookmarks_(merged)
+      bumpGridResetKey()
+    } catch (err) {
+      console.error('[App] remix error:', err)
+    }
   }
 
   // ── Filters (folder + color + others) ─────────────────────────────────────
@@ -157,6 +181,7 @@ function App() {
         <HUD
           onSync={handleSync}
           onArrange={handleArrange}
+          onRemix={handleRemix}
           panelOpen={panelOpen}
         />
       </div>

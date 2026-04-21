@@ -33,7 +33,7 @@ const HudBtn = ({ onClick, title, disabled, spinning, children }) => (
   </button>
 )
 
-export default function HUD({ onSync, onArrange, panelOpen }) {
+export default function HUD({ onSync, onArrange, onRemix, panelOpen }) {
   const [isSyncing, setIsSyncing] = useState(false)
   const [syncStatus, setSyncStatus] = useState('')
 
@@ -138,6 +138,12 @@ export default function HUD({ onSync, onArrange, panelOpen }) {
               <rect x="8" y="1" width="5" height="5" rx="1" stroke="currentColor" strokeWidth="1.3"/>
               <rect x="1" y="8" width="5" height="5" rx="1" stroke="currentColor" strokeWidth="1.3"/>
               <rect x="8" y="8" width="5" height="5" rx="1" stroke="currentColor" strokeWidth="1.3"/>
+            </svg>
+          </HudBtn>
+          <HudBtn onClick={onRemix} title="Remix — shuffle grid">
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+              <path d="M1 4h8.5M1 10h8.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
+              <path d="M8 2l3 2-3 2M8 8l3 2-3 2" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
             </svg>
           </HudBtn>
         </div>
