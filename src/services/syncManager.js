@@ -133,25 +133,25 @@ export function computeMasonryPositions(bookmarks, viewportWidth, aspectRatios =
   const startX = Math.max(GAP, Math.round((vw - grid) / 2))
   const colH   = new Array(cols).fill(GAP)
 
-  return bookmarks.map(bm => {
-    const hasMedia = !!(bm.thumbnail || bm.videoUrl)
-    let cardH
-    if (hasMedia) {
-      // Use known aspect ratio if available, otherwise default to 16:9
-      const ratio = aspectRatios[bm.id] ?? (16 / 9)
-      cardH = Math.round(CARD_W / ratio)
-    } else {
-      cardH = 120   // text-only cards
-    }
+  const placed = []
 
-    const minH = Math.min(...colH)
-    const col  = colH.indexOf(minH)
-    const x    = startX + col * (CARD_W + GAP)
-    const y    = colH[col]
-    colH[col] += cardH + GAP
+  for (const bm of bookmarks) {
+    const ratio = aspectRatios[bm.id]
+    // Only place cards whose actual aspect ratio we know — avoids phantom gaps
+    // from cards that haven't loaded yet using the wrong estimated height
+    if (!ratio) continue
 
-    return { ...bm, position: { x, y } }
-  })
+    const cardH = Math.round(CARD_W / ratio)
+    const minH  = Math.min(...colH)
+    const col   = colH.indexOf(minH)
+    const x     = startX + col * (CARD_W + GAP)
+    const y     = colH[col]
+    colH[col]  += cardH + GAP
+
+    placed.push({ ...bm, position: { x, y } })
+  }
+
+  return placed
 }
 
 function generateTestBookmarks() {

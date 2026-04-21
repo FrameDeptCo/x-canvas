@@ -32,6 +32,7 @@ const BookmarkCard = ({ bookmark, onSelect, isSelected }) => {
   // ── Load video ────────────────────────────────────────────────────────────
   useEffect(() => {
     if (!bookmark.videoUrl) return
+    let cancelled = false
     const vid = document.createElement('video')
     vid.src = bookmark.videoUrl
     vid.muted = true
@@ -39,46 +40,69 @@ const BookmarkCard = ({ bookmark, onSelect, isSelected }) => {
     vid.autoplay = true
     vid.playsInline = true
     vid.crossOrigin = 'anonymous'
-    vid.onloadedmetadata = () => {
+    vid.onloadeddata = () => {
+      if (cancelled) return
       if (vid.videoWidth && vid.videoHeight) {
         const ratio = vid.videoWidth / vid.videoHeight
         setImgAspect(ratio)
         setAspectRatio(bookmark.id, ratio)
       }
-      // Extract dominant color from video frame
-      const color = extractDominantColor(vid)
-      if (color) setBookmarkColor(bookmark.id, color)
       vid.play().catch(() => {})
       setImage(vid)
+      // Extract color after a short delay so frame is painted
+      setTimeout(() => {
+        if (cancelled) return
+        const color = extractDominantColor(vid)
+        if (color) setBookmarkColor(bookmark.id, color)
+      }, 200)
     }
+    vid.onerror = () => { /* silently skip unloadable videos */ }
     videoRef.current = vid
     return () => {
+      cancelled = true
       vid.pause()
       vid.src = ''
     }
-  }, [bookmark.videoUrl, bookmark.id, setAspectRatio])
+  }, [bookmark.videoUrl, bookmark.id, setAspectRatio, setBookmarkColor])
 
   // ── Load thumbnail (only if no video) ────────────────────────────────────
   useEffect(() => {
     if (bookmark.videoUrl) return   // video takes priority
     if (!bookmark.thumbnail) return
-    const img = new window.Image()
-    img.crossOrigin = 'anonymous'
-    img.src = bookmark.thumbnail.includes('pbs.twimg.com')
+
+    let cancelled = false
+    const load = (src) => {
+      const img = new window.Image()
+      img.crossOrigin = 'anonymous'
+      img.src = src
+      img.onload = () => {
+        if (cancelled) return
+        setImage(img)
+        if (img.naturalWidth && img.naturalHeight) {
+          const ratio = img.naturalWidth / img.naturalHeight
+          setImgAspect(ratio)
+          setAspectRatio(bookmark.id, ratio)
+        }
+        const color = extractDominantColor(img)
+        if (color) setBookmarkColor(bookmark.id, color)
+      }
+      img.onerror = () => {
+        if (cancelled) return
+        // If :large failed, retry without the suffix
+        if (src.endsWith(':large')) {
+          load(bookmark.thumbnail)
+        }
+        // Otherwise silently give up — card stays hidden
+      }
+    }
+
+    const src = bookmark.thumbnail.includes('pbs.twimg.com')
       ? bookmark.thumbnail + ':large'
       : bookmark.thumbnail
-    img.onload = () => {
-      setImage(img)
-      if (img.naturalWidth && img.naturalHeight) {
-        const ratio = img.naturalWidth / img.naturalHeight
-        setImgAspect(ratio)
-        setAspectRatio(bookmark.id, ratio)
-      }
-      // Extract dominant color for filtering
-      const color = extractDominantColor(img)
-      if (color) setBookmarkColor(bookmark.id, color)
-    }
-  }, [bookmark.thumbnail, bookmark.videoUrl, bookmark.id, setAspectRatio])
+    load(src)
+
+    return () => { cancelled = true }
+  }, [bookmark.thumbnail, bookmark.videoUrl, bookmark.id, setAspectRatio, setBookmarkColor])
 
   // ── Height ────────────────────────────────────────────────────────────────
   const hasImg  = !!image

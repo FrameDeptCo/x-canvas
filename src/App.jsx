@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { useAppStore } from './store/appState'
 import { getLocalBookmarks, getLocalFolders, computeMasonryPositions } from './services/syncManager'
 import { initDB, saveBookmarks } from './db/bookmarkStore'
@@ -24,6 +24,9 @@ function App() {
   const bookmarkColors      = useAppStore(s => s.bookmarkColors)
 
   const panelOpen = !!selectedBookmark
+  const arrangeTimerRef = useRef(null)
+  // Track how many aspect ratios we've already arranged at, to avoid re-running unnecessarily
+  const lastArrangedCountRef = useRef(0)
 
   // ── Init ──────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -64,42 +67,46 @@ function App() {
     setFolders(flds)
     setBookmarks_(bms)
     setFolders_(flds)
-
-    // Auto-arrange 3 seconds later when images have loaded and reported aspect ratios
-    setTimeout(() => {
-      handleArrange()
-    }, 3000)
+    lastArrangedCountRef.current = 0  // reset so auto-arrange kicks in fresh
   }
 
-  // ── Reset / arrange all bookmarks back into the masonry grid ─────────────
-  const handleArrange = async () => {
+  // ── Core arrange logic — shared by auto-arrange + manual reset button ─────
+  const arrangeNow = async (ratios) => {
     try {
       const allBms = await getLocalBookmarks()
-      // Only arrange media bookmarks (same as what the canvas shows)
       const bms = allBms.filter(b => b.thumbnail || b.videoUrl)
-      console.log('[App] handleArrange - loaded', allBms.length, 'total,', bms.length, 'media bookmarks')
-      console.log('[App] handleArrange - aspectRatios keys:', Object.keys(aspectRatios).length)
-
-      // Account for info panel width (280px when open, 0 when closed)
       const panelW = panelOpen ? 280 : 0
       const vw = window.innerWidth - panelW
-
-      const arranged = computeMasonryPositions(bms, vw, aspectRatios)
-      console.log('[App] handleArrange - arranged', arranged.length, 'cards, first 3:', arranged.slice(0, 3).map(b => ({ id: b.id, pos: b.position })))
-
+      const arranged = computeMasonryPositions(bms, vw, ratios)
       await saveBookmarks(arranged)
-      console.log('[App] handleArrange - saved to DB')
-
-      // Merge arranged positions back into full bookmark list for state
       const posMap = Object.fromEntries(arranged.map(b => [b.id, b.position]))
       const merged = allBms.map(b => posMap[b.id] ? { ...b, position: posMap[b.id] } : b)
-
       setBookmarks(merged)
       setBookmarks_(merged)
-      console.log('[App] handleArrange - state updated')
-    } catch (error) {
-      console.error('[App] handleArrange error:', error)
+      lastArrangedCountRef.current = Object.keys(ratios).length
+      console.log(`[App] auto-arrange complete — ${arranged.length} cards, ${Object.keys(ratios).length} ratios known`)
+    } catch (err) {
+      console.error('[App] arrangeNow error:', err)
     }
+  }
+
+  // ── Auto-arrange: fires whenever a new aspect ratio is learned ─────────────
+  // Debounced 600ms so rapid image loads batch into one arrange pass.
+  useEffect(() => {
+    const count = Object.keys(aspectRatios).length
+    if (count === 0) return
+    if (count === lastArrangedCountRef.current) return  // nothing new
+    clearTimeout(arrangeTimerRef.current)
+    arrangeTimerRef.current = setTimeout(() => {
+      arrangeNow(aspectRatios)
+    }, 600)
+    return () => clearTimeout(arrangeTimerRef.current)
+  }, [aspectRatios])  // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Manual reset grid button ──────────────────────────────────────────────
+  const handleArrange = () => {
+    lastArrangedCountRef.current = 0  // force re-arrange even if count matches
+    arrangeNow(aspectRatios)
   }
 
   // ── Filters (folder + color + others) ─────────────────────────────────────
