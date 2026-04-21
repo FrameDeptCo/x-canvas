@@ -1,0 +1,260 @@
+.info-panel {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 280px;
+  background: #1a1a1a;
+  border-left: 1px solid rgba(255,255,255,0.07);
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  overflow-x: hidden;
+  z-index: 100;
+
+  /* slide-in from right */
+  transform: translateX(100%);
+  transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.info-panel.visible {
+  transform: translateX(0);
+}
+
+/* hide scrollbar but keep scroll */
+.info-panel::-webkit-scrollbar { width: 4px; }
+.info-panel::-webkit-scrollbar-track { background: transparent; }
+.info-panel::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px; }
+
+/* ── Thumbnail ── */
+.ip-thumb {
+  position: relative;
+  width: 100%;
+  flex-shrink: 0;
+  background: #111;
+  overflow: hidden;
+}
+
+.ip-thumb img {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.ip-thumb--text {
+  height: 160px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #444;
+  font-size: 12px;
+}
+
+.ip-badge {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  background: rgba(0,0,0,0.7);
+  color: #aaa;
+  font-size: 9px;
+  font-weight: 700;
+  font-family: 'Anthropic Mono', monospace;
+  letter-spacing: 0.05em;
+  padding: 2px 5px;
+  border-radius: 3px;
+}
+
+/* ── Colour swatches ── */
+.ip-swatches {
+  display: flex;
+  gap: 5px;
+  padding: 10px 14px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+
+.ip-swatch {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 1px solid rgba(255,255,255,0.1);
+  cursor: pointer;
+  transition: transform 100ms;
+  flex-shrink: 0;
+}
+
+.ip-swatch:hover {
+  transform: scale(1.2);
+}
+
+/* ── Sections ── */
+.ip-section {
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  padding: 10px 14px;
+}
+
+.ip-section--pad {
+  padding: 10px 14px;
+}
+
+.ip-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #f0f0f0;
+  line-height: 1.3;
+  margin: 0 0 2px;
+}
+
+.ip-handle {
+  font-size: 11px;
+  color: #666;
+  margin: 0;
+}
+
+.ip-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: #555;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 6px;
+  font-family: 'Anthropic Mono', monospace;
+}
+
+.ip-notes {
+  font-size: 11px;
+  color: #aaa;
+  line-height: 1.6;
+  margin: 0;
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+/* ── URL ── */
+.ip-url {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  color: #6b9eff;
+  text-decoration: none;
+  word-break: break-all;
+  transition: color 100ms;
+}
+
+.ip-url:hover { color: #90b8ff; }
+.ip-url svg   { flex-shrink: 0; }
+
+/* ── Tags ── */
+.ip-add-tag {
+  background: transparent;
+  border: 1px dashed rgba(255,255,255,0.15);
+  color: #666;
+  font-size: 10px;
+  font-family: 'Anthropic Mono', monospace;
+  padding: 4px 9px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: color 100ms, border-color 100ms;
+}
+
+.ip-add-tag:hover {
+  color: #aaa;
+  border-color: rgba(255,255,255,0.3);
+}
+
+/* ── Folder chips ── */
+.ip-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  align-items: center;
+}
+
+.ip-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.1);
+  color: #ccc;
+  font-size: 10px;
+  padding: 3px 8px;
+  border-radius: 4px;
+}
+
+.ip-chip svg { cursor: pointer; opacity: 0.5; }
+.ip-chip svg:hover { opacity: 1; }
+
+.ip-chip-add {
+  background: transparent;
+  border: 1px dashed rgba(255,255,255,0.15);
+  color: #555;
+  font-size: 12px;
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: color 100ms;
+}
+
+.ip-chip-add:hover { color: #aaa; }
+
+/* ── Properties ── */
+.ip-props {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.ip-prop-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+}
+
+.ip-prop-row span:first-child {
+  color: #555;
+  font-family: 'Anthropic Mono', monospace;
+}
+
+.ip-prop-row span:last-child {
+  color: #aaa;
+  text-align: right;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Footer ── */
+.ip-footer {
+  padding: 14px;
+  margin-top: auto;
+  border-top: 1px solid rgba(255,255,255,0.06);
+}
+
+.ip-open-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  width: 100%;
+  padding: 9px;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 6px;
+  color: #ccc;
+  font-size: 11px;
+  font-weight: 600;
+  font-family: 'Anthropic Mono', monospace;
+  text-decoration: none;
+  transition: background 100ms, color 100ms;
+}
+
+.ip-open-btn:hover {
+  background: rgba(255,255,255,0.1);
+  color: #fff;
+}

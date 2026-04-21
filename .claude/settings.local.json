@@ -1,0 +1,37 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm create *)",
+      "Bash(npm install *)",
+      "Bash(rm -rf //192.168.1.153/NAS/Coding/Claude/x-canvas/x-canvas)",
+      "Read(///192.168.1.153/NAS/Coding/Claude/**)",
+      "mcp__Claude_in_Chrome__tabs_context_mcp",
+      "mcp__Claude_in_Chrome__navigate",
+      "mcp__Claude_in_Chrome__computer",
+      "Bash(ngrok http *)",
+      "Bash('/c/Users/ws/Downloads/_IDM/Compressed/ngrok-v3-stable-windows-amd64/ngrok.exe' http *)",
+      "Bash(curl -s http://localhost:4040/api/tunnels)",
+      "Bash(pkill -f \"npm run dev\")",
+      "Bash(npm run *)",
+      "mcp__Claude_in_Chrome__javascript_tool",
+      "mcp__Claude_in_Chrome__tabs_create_mcp",
+      "mcp__Claude_in_Chrome__tabs_close_mcp",
+      "mcp__Claude_in_Chrome__read_console_messages",
+      "mcp__Claude_in_Chrome__read_page",
+      "mcp__Claude_in_Chrome__read_network_requests",
+      "Bash(curl -s -w \"\\\\n%{http_code}\\\\n\" http://localhost:5173/)",
+      "Bash(curl -s http://localhost:5173/)",
+      "Bash(curl -s http://localhost:5176/)",
+      "Bash(taskkill /F /IM node.exe)",
+      "Bash(netstat -tuln)",
+      "Bash(curl -s -I http://localhost:5176/)",
+      "Bash(echo \"Started dev server PID: $!\")",
+      "Bash(start cmd *)",
+      "Bash(node -e \"const e = require\\('./node_modules/electron/package.json'\\); console.log\\('Electron version:', e.version\\)\")",
+      "Bash(taskkill /F /IM electron.exe)",
+      "Bash(taskkill /F /IM \"Electron.exe\")",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)"
+    ]
+  }
+}
