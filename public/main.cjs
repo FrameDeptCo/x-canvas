@@ -369,18 +369,31 @@ ipcMain.handle("fetch-bookmarks", async (_, cookie) => {
 
     console.log("[Electron] Total bookmarks found:", bookmarks.length);
 
+    // Try to fetch user's lists/collections
+    let collections = [
+      {
+        id: "default",
+        name: "All Bookmarks",
+        color: "#007bff",
+        createdAt: new Date().toISOString(),
+      },
+    ];
+
+    try {
+      const lists = await fetchListsGraphQL(sess, bearerToken, cookieStr, ct0);
+      if (lists.length > 0) {
+        collections = [...collections, ...lists];
+        console.log(`[Electron] Returning ${collections.length} collections (default + ${lists.length} lists)`);
+      }
+    } catch (e) {
+      console.log("[Electron] Could not fetch lists, using default folder only:", e.message);
+    }
+
     return {
       success: true,
       data: {
         bookmarks: bookmarks.length > 0 ? bookmarks : createSampleBookmarks(),
-        collections: [
-          {
-            id: "default",
-            name: "All Bookmarks",
-            color: "#007bff",
-            createdAt: new Date().toISOString(),
-          },
-        ],
+        collections,
       },
     };
   } catch (error) {
@@ -670,6 +683,107 @@ function parseV2Bookmarks(data) {
   }
 
   return bookmarks;
+}
+
+async function fetchListsGraphQL(sess, bearerToken, cookieStr, ct0) {
+  // Fetch user's lists from X.com
+  // Try common list query IDs
+  const listQueryIds = [
+    "R-NsXr7O8MqEpBdDQ4KBMA",  // ListsManagement or similar
+    "BDlYrMWNz8n-5N1rW8Ap8w",  // UserLists or similar
+  ];
+
+  try {
+    // Try to construct a lists query
+    const variables = {
+      count: 100,
+      cursor: null,
+    };
+
+    const features = {
+      rweb_tipjar_consumption_enabled: true,
+      responsive_web_graphql_exclude_directive_enabled: true,
+      verified_phone_label_enabled: false,
+      creator_subscriptions_tweet_preview_api_enabled: true,
+      responsive_web_graphql_timeline_navigation_enabled: true,
+      responsive_web_graphql_skip_user_favorites_timeline_enabled: false,
+      communities_web_enable_tweet_community_results: true,
+      c9s_tweet_anatomy_moderator_badge_enabled: true,
+      articles_preview_enabled: true,
+      tweetypie_unmention_optimization_enabled: true,
+      responsive_web_edit_tweet_api_enabled: true,
+      graphql_is_translatable_rweb_tweet_is_translatable_enabled: true,
+      view_counts_everywhere_api_enabled: true,
+      longform_notetweets_consumption_enabled: true,
+      responsive_web_twitter_article_tweet_consumption_enabled: false,
+      tweet_awards_web_tipping_enabled: false,
+      creator_subscriptions_quote_tweet_preview_enabled: false,
+      freedom_of_speech_not_reach_fetch_enabled: true,
+      standardized_nudges_misinfo: true,
+      tweet_with_visibility_results_prefer_gql_limited_by_permissions_enabled: true,
+      rweb_video_timestamps_enabled: true,
+      longform_notetweets_rich_text_consumption_enabled: true,
+      longform_notetweets_are_collapsible_enabled: true,
+      responsive_web_enhance_cards_enabled: false,
+    };
+
+    for (const queryId of listQueryIds) {
+      try {
+        const response = await sess.fetch(
+          `https://x.com/i/api/graphql/${queryId}/UserLists`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: bearerToken,
+              "x-csrf-token": ct0 || "",
+            },
+            body: JSON.stringify({ variables, features }),
+          }
+        );
+
+        if (!response.ok) continue;
+
+        const text = await response.text();
+        if (!text) continue;
+
+        const data = JSON.parse(text);
+        const lists = [];
+
+        // Try to extract lists from response
+        // Path may vary: data.user.result.timeline_v2.timeline.instructions[].entries[].content.itemContent.list
+        if (data?.data?.user?.result?.timeline_v2?.timeline?.instructions) {
+          for (const instr of data.data.user.result.timeline_v2.timeline.instructions) {
+            if (instr.entries) {
+              for (const entry of instr.entries) {
+                if (entry.content?.itemContent?.list) {
+                  const list = entry.content.itemContent.list;
+                  lists.push({
+                    id: list.id_str || list.id,
+                    name: list.name,
+                    description: list.description || "",
+                    color: `#${Math.floor(Math.random() * 16777215).toString(16)}`,
+                    createdAt: new Date().toISOString(),
+                  });
+                }
+              }
+            }
+          }
+        }
+
+        if (lists.length > 0) {
+          console.log(`[Electron] Found ${lists.length} lists`);
+          return lists;
+        }
+      } catch (e) {
+        console.log(`[Electron] Lists queryId=${queryId} failed:`, e.message);
+      }
+    }
+  } catch (e) {
+    console.error("[Electron] Error fetching lists:", e.message);
+  }
+
+  return [];
 }
 
 function createSampleBookmarks() {

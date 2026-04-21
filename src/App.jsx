@@ -73,11 +73,27 @@ function App() {
 
   // ── Reset / arrange all bookmarks back into the masonry grid ─────────────
   const handleArrange = async () => {
-    const bms = await getLocalBookmarks()
-    const arranged = computeMasonryPositions(bms, window.innerWidth, aspectRatios)
-    await saveBookmarks(arranged)
-    setBookmarks(arranged)
-    setBookmarks_(arranged)
+    try {
+      const bms = await getLocalBookmarks()
+      console.log('[App] handleArrange - loaded', bms.length, 'bookmarks')
+      console.log('[App] handleArrange - aspectRatios:', aspectRatios)
+
+      // Account for info panel width (280px when open, 0 when closed)
+      const panelW = panelOpen ? 280 : 0
+      const vw = window.innerWidth - panelW
+
+      const arranged = computeMasonryPositions(bms, vw, aspectRatios)
+      console.log('[App] handleArrange - arranged first 3:', arranged.slice(0, 3).map(b => ({ id: b.id, pos: b.position })))
+
+      await saveBookmarks(arranged)
+      console.log('[App] handleArrange - saved to DB')
+
+      setBookmarks(arranged)
+      setBookmarks_(arranged)
+      console.log('[App] handleArrange - state updated')
+    } catch (error) {
+      console.error('[App] handleArrange error:', error)
+    }
   }
 
   // ── Filters (folder + color + others) ─────────────────────────────────────
