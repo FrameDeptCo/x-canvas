@@ -22,6 +22,7 @@ function App() {
   const aspectRatios        = useAppStore(s => s.aspectRatios)
   const activeFilters       = useAppStore(s => s.activeFilters)
   const bookmarkColors      = useAppStore(s => s.bookmarkColors)
+  const bumpGridResetKey    = useAppStore(s => s.bumpGridResetKey)
 
   const panelOpen = !!selectedBookmark
   const arrangeTimerRef = useRef(null)
@@ -105,7 +106,8 @@ function App() {
 
   // ── Manual reset grid button ──────────────────────────────────────────────
   const handleArrange = () => {
-    lastArrangedCountRef.current = 0  // force re-arrange even if count matches
+    lastArrangedCountRef.current = 0
+    bumpGridResetKey()  // forces every BookmarkCard to re-read its position
     arrangeNow(aspectRatios)
   }
 

@@ -12,8 +12,9 @@ const BookmarkCard = ({ bookmark, onSelect, isSelected }) => {
   const [imgAspect,  setImgAspect]  = useState(16 / 9)
   const wasDragged   = useRef(false)
   const videoRef     = useRef(null)
-  const setAspectRatio = useAppStore(s => s.setAspectRatio)
+  const setAspectRatio  = useAppStore(s => s.setAspectRatio)
   const setBookmarkColor = useAppStore(s => s.setBookmarkColor)
+  const gridResetKey    = useAppStore(s => s.gridResetKey)
 
   const validPos = {
     x: typeof bookmark.position?.x === 'number' ? bookmark.position.x : 0,
@@ -21,13 +22,13 @@ const BookmarkCard = ({ bookmark, onSelect, isSelected }) => {
   }
   const [pos, setPos] = useState(validPos)
 
-  // Sync pos when bookmark.position changes (e.g. after Reset Grid)
+  // Sync pos when bookmark.position changes OR grid is reset
   useEffect(() => {
     setPos({
       x: typeof bookmark.position?.x === 'number' ? bookmark.position.x : 0,
       y: typeof bookmark.position?.y === 'number' ? bookmark.position.y : 0,
     })
-  }, [bookmark.position?.x, bookmark.position?.y])
+  }, [bookmark.position?.x, bookmark.position?.y, gridResetKey])
 
   // ── Load thumbnail image (always — used as fallback for failed videos too) ──
   const loadThumbnail = (cancelled, setImg) => {

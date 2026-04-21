@@ -19,6 +19,8 @@ export const useAppStore = create((set) => ({
   // Canvas
   canvasZoom: 1,
   canvasPan:  { x: 0, y: 0 },
+  gridResetKey: 0,
+  bumpGridResetKey: () => set(s => ({ gridResetKey: s.gridResetKey + 1 })),
   setCanvasZoom: (z) => set({ canvasZoom: z }),
   setCanvasPan:  (p) => set({ canvasPan: p }),
   // Zoom from viewport center (used by slider)
