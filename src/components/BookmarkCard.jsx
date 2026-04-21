@@ -23,6 +23,14 @@ const BookmarkCard = ({ bookmark, onSelect, isSelected }) => {
   }
   const [pos, setPos] = useState(validPos)
 
+  // Sync pos when bookmark.position changes (e.g. after Reset Grid)
+  useEffect(() => {
+    setPos({
+      x: typeof bookmark.position?.x === 'number' ? bookmark.position.x : 0,
+      y: typeof bookmark.position?.y === 'number' ? bookmark.position.y : 0,
+    })
+  }, [bookmark.position?.x, bookmark.position?.y])
+
   // ── Load video ────────────────────────────────────────────────────────────
   useEffect(() => {
     if (!bookmark.videoUrl) return

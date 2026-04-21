@@ -74,22 +74,28 @@ function App() {
   // ── Reset / arrange all bookmarks back into the masonry grid ─────────────
   const handleArrange = async () => {
     try {
-      const bms = await getLocalBookmarks()
-      console.log('[App] handleArrange - loaded', bms.length, 'bookmarks')
-      console.log('[App] handleArrange - aspectRatios:', aspectRatios)
+      const allBms = await getLocalBookmarks()
+      // Only arrange media bookmarks (same as what the canvas shows)
+      const bms = allBms.filter(b => b.thumbnail || b.videoUrl)
+      console.log('[App] handleArrange - loaded', allBms.length, 'total,', bms.length, 'media bookmarks')
+      console.log('[App] handleArrange - aspectRatios keys:', Object.keys(aspectRatios).length)
 
       // Account for info panel width (280px when open, 0 when closed)
       const panelW = panelOpen ? 280 : 0
       const vw = window.innerWidth - panelW
 
       const arranged = computeMasonryPositions(bms, vw, aspectRatios)
-      console.log('[App] handleArrange - arranged first 3:', arranged.slice(0, 3).map(b => ({ id: b.id, pos: b.position })))
+      console.log('[App] handleArrange - arranged', arranged.length, 'cards, first 3:', arranged.slice(0, 3).map(b => ({ id: b.id, pos: b.position })))
 
       await saveBookmarks(arranged)
       console.log('[App] handleArrange - saved to DB')
 
-      setBookmarks(arranged)
-      setBookmarks_(arranged)
+      // Merge arranged positions back into full bookmark list for state
+      const posMap = Object.fromEntries(arranged.map(b => [b.id, b.position]))
+      const merged = allBms.map(b => posMap[b.id] ? { ...b, position: posMap[b.id] } : b)
+
+      setBookmarks(merged)
+      setBookmarks_(merged)
       console.log('[App] handleArrange - state updated')
     } catch (error) {
       console.error('[App] handleArrange error:', error)
@@ -98,6 +104,9 @@ function App() {
 
   // ── Filters (folder + color + others) ─────────────────────────────────────
   const filteredBookmarks = bookmarks.filter(b => {
+    // Media-only: skip text-only bookmarks (no image or video)
+    if (!b.thumbnail && !b.videoUrl) return false
+
     // Folder filter
     if (selectedFolder !== 'all' && b.folderId !== selectedFolder) return false
 

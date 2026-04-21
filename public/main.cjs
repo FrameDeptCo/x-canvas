@@ -11,6 +11,7 @@ const isMac = process.platform === "darwin";
 // Captured from network requests during login
 let capturedBearerToken = null;
 let capturedQueryId = null;
+let capturedFolderQueryId = null;
 
 // Initialize Store dynamically (it's an ESM module)
 async function initStore() {
@@ -83,6 +84,12 @@ app.on("ready", async () => {
       if (bookmarksMatch && bookmarksMatch[1]) {
         capturedQueryId = bookmarksMatch[1];
         console.log(`[Electron] Captured Bookmarks query ID: ${capturedQueryId}`);
+      }
+      // Capture BookmarkFolders query ID
+      const foldersMatch = details.url.match(/graphql\/([^/]+)\/BookmarkFolders/);
+      if (foldersMatch && foldersMatch[1]) {
+        capturedFolderQueryId = foldersMatch[1];
+        console.log(`[Electron] Captured BookmarkFolders query ID: ${capturedFolderQueryId}`);
       }
       callback({ requestHeaders: details.requestHeaders });
     }
@@ -210,23 +217,25 @@ async function captureBookmarksFromPage(sess) {
       done(null);
     }, 30000);
 
-    // Intercept the GraphQL bookmarks response
+    // Intercept the GraphQL bookmarks & folders responses
     sess.webRequest.onCompleted(
-      { urls: ["https://x.com/i/api/graphql/*/Bookmarks*"] },
+      { urls: ["https://x.com/i/api/graphql/*/*"] },
       async (details) => {
-        if (resolved) return;
-        console.log(`[Electron] Intercepted Bookmarks API call: ${details.url}, status: ${details.statusCode}`);
-        // We captured the query ID from the URL
-        const queryIdMatch = details.url.match(/graphql\/([^/]+)\/Bookmarks/);
-        if (queryIdMatch) {
-          capturedQueryId = queryIdMatch[1];
-          console.log(`[Electron] Captured query ID: ${capturedQueryId}`);
+        const bookmarksMatch = details.url.match(/graphql\/([^/]+)\/Bookmarks/);
+        if (bookmarksMatch) {
+          capturedQueryId = bookmarksMatch[1];
+          console.log(`[Electron] Captured Bookmarks query ID: ${capturedQueryId}`);
         }
-        // We can't read the response body from onCompleted, but we have the queryId and bearer token
-        // Give it a moment for the bearer token to be captured, then resolve
-        setTimeout(() => {
-          if (!resolved) done({ queryId: capturedQueryId });
-        }, 1000);
+        const foldersMatch = details.url.match(/graphql\/([^/]+)\/BookmarkFolders/);
+        if (foldersMatch) {
+          capturedFolderQueryId = foldersMatch[1];
+          console.log(`[Electron] Captured BookmarkFolders query ID: ${capturedFolderQueryId}`);
+        }
+        if (!resolved && (bookmarksMatch || foldersMatch)) {
+          setTimeout(() => {
+            if (!resolved) done({ queryId: capturedQueryId });
+          }, 1500);
+        }
       }
     );
 
@@ -380,13 +389,13 @@ ipcMain.handle("fetch-bookmarks", async (_, cookie) => {
     ];
 
     try {
-      const lists = await fetchListsGraphQL(sess, bearerToken, cookieStr, ct0);
-      if (lists.length > 0) {
-        collections = [...collections, ...lists];
-        console.log(`[Electron] Returning ${collections.length} collections (default + ${lists.length} lists)`);
+      const folders = await fetchBookmarkFolders(sess, bearerToken, cookieStr, ct0);
+      if (folders.length > 0) {
+        collections = [...collections, ...folders];
+        console.log(`[Electron] Returning ${collections.length} collections (default + ${folders.length} bookmark folders)`);
       }
     } catch (e) {
-      console.log("[Electron] Could not fetch lists, using default folder only:", e.message);
+      console.log("[Electron] Could not fetch bookmark folders, using default folder only:", e.message);
     }
 
     return {
@@ -685,105 +694,174 @@ function parseV2Bookmarks(data) {
   return bookmarks;
 }
 
-async function fetchListsGraphQL(sess, bearerToken, cookieStr, ct0) {
-  // Fetch user's lists from X.com
-  // Try common list query IDs
-  const listQueryIds = [
-    "R-NsXr7O8MqEpBdDQ4KBMA",  // ListsManagement or similar
-    "BDlYrMWNz8n-5N1rW8Ap8w",  // UserLists or similar
-  ];
-
+async function discoverFolderQueryId(sess, cookieStr) {
+  // Try to find BookmarkFolders query ID from X.com JS bundles
   try {
-    // Try to construct a lists query
-    const variables = {
-      count: 100,
-      cursor: null,
-    };
+    const homeRes = await sess.fetch("https://x.com/i/bookmarks", {
+      headers: {
+        "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        cookie: cookieStr,
+        accept: "text/html,application/xhtml+xml",
+      },
+    });
+    const html = await homeRes.text();
+    const scriptUrls = [...new Set(
+      (html.match(/https:\/\/abs\.twimg\.com\/responsive-web\/client-web\/[^"']+\.js/g) || [])
+    )].slice(0, 8);
 
-    const features = {
-      rweb_tipjar_consumption_enabled: true,
-      responsive_web_graphql_exclude_directive_enabled: true,
-      verified_phone_label_enabled: false,
-      creator_subscriptions_tweet_preview_api_enabled: true,
-      responsive_web_graphql_timeline_navigation_enabled: true,
-      responsive_web_graphql_skip_user_favorites_timeline_enabled: false,
-      communities_web_enable_tweet_community_results: true,
-      c9s_tweet_anatomy_moderator_badge_enabled: true,
-      articles_preview_enabled: true,
-      tweetypie_unmention_optimization_enabled: true,
-      responsive_web_edit_tweet_api_enabled: true,
-      graphql_is_translatable_rweb_tweet_is_translatable_enabled: true,
-      view_counts_everywhere_api_enabled: true,
-      longform_notetweets_consumption_enabled: true,
-      responsive_web_twitter_article_tweet_consumption_enabled: false,
-      tweet_awards_web_tipping_enabled: false,
-      creator_subscriptions_quote_tweet_preview_enabled: false,
-      freedom_of_speech_not_reach_fetch_enabled: true,
-      standardized_nudges_misinfo: true,
-      tweet_with_visibility_results_prefer_gql_limited_by_permissions_enabled: true,
-      rweb_video_timestamps_enabled: true,
-      longform_notetweets_rich_text_consumption_enabled: true,
-      longform_notetweets_are_collapsible_enabled: true,
-      responsive_web_enhance_cards_enabled: false,
-    };
-
-    for (const queryId of listQueryIds) {
+    for (const url of scriptUrls) {
       try {
-        const response = await sess.fetch(
-          `https://x.com/i/api/graphql/${queryId}/UserLists`,
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: bearerToken,
-              "x-csrf-token": ct0 || "",
-            },
-            body: JSON.stringify({ variables, features }),
-          }
-        );
-
-        if (!response.ok) continue;
-
-        const text = await response.text();
-        if (!text) continue;
-
-        const data = JSON.parse(text);
-        const lists = [];
-
-        // Try to extract lists from response
-        // Path may vary: data.user.result.timeline_v2.timeline.instructions[].entries[].content.itemContent.list
-        if (data?.data?.user?.result?.timeline_v2?.timeline?.instructions) {
-          for (const instr of data.data.user.result.timeline_v2.timeline.instructions) {
-            if (instr.entries) {
-              for (const entry of instr.entries) {
-                if (entry.content?.itemContent?.list) {
-                  const list = entry.content.itemContent.list;
-                  lists.push({
-                    id: list.id_str || list.id,
-                    name: list.name,
-                    description: list.description || "",
-                    color: `#${Math.floor(Math.random() * 16777215).toString(16)}`,
-                    createdAt: new Date().toISOString(),
-                  });
-                }
-              }
-            }
+        const res = await sess.fetch(url, {
+          headers: { "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
+        });
+        const js = await res.text();
+        const patterns = [
+          /queryId:"([A-Za-z0-9_-]{20,})",operationName:"BookmarkFolders"/,
+          /"queryId":"([A-Za-z0-9_-]{20,})","operationName":"BookmarkFolders"/,
+        ];
+        for (const p of patterns) {
+          const m = js.match(p);
+          if (m && m[1]) {
+            console.log(`[Electron] Found BookmarkFolders query ID: ${m[1]}`);
+            return m[1];
           }
         }
-
-        if (lists.length > 0) {
-          console.log(`[Electron] Found ${lists.length} lists`);
-          return lists;
-        }
-      } catch (e) {
-        console.log(`[Electron] Lists queryId=${queryId} failed:`, e.message);
-      }
+      } catch (_) {}
     }
   } catch (e) {
-    console.error("[Electron] Error fetching lists:", e.message);
+    console.error("[Electron] discoverFolderQueryId error:", e.message);
+  }
+  return null;
+}
+
+async function fetchBookmarkFolders(sess, bearerToken, cookieStr, ct0) {
+  // Build list of query IDs to try (captured > discovered > known fallbacks)
+  const discoveredId = await discoverFolderQueryId(sess, cookieStr);
+  const queryIds = [
+    capturedFolderQueryId,
+    discoveredId,
+    // Known BookmarkFolders query IDs (rotate periodically — extend as needed)
+    "xT36W0ux8-8zGmZFNYUvMQ",
+    "4KHZvFHmGxNjmABUxD_mVg",
+    "F99EOHhKwulZ_HZpvfPMug",
+  ].filter(Boolean);
+
+  console.log(`[Electron] BookmarkFolders: trying ${queryIds.length} query IDs`);
+
+  const headers = {
+    authorization: bearerToken,
+    "x-csrf-token": ct0 || "",
+    "x-twitter-active-user": "yes",
+    "x-twitter-auth-type": "OAuth2Session",
+    "x-twitter-client-language": "en",
+    cookie: cookieStr,
+    "content-type": "application/json",
+    referer: "https://x.com/i/bookmarks",
+    origin: "https://x.com",
+    accept: "*/*",
+    "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+  };
+
+  for (const queryId of queryIds) {
+    try {
+      // BookmarkFolders uses GET with query params
+      const params = new URLSearchParams({
+        features: JSON.stringify({
+          rweb_tipjar_consumption_enabled: true,
+          responsive_web_graphql_exclude_directive_enabled: true,
+          verified_phone_label_enabled: false,
+          creator_subscriptions_tweet_preview_api_enabled: true,
+          responsive_web_graphql_timeline_navigation_enabled: true,
+          responsive_web_graphql_skip_user_profile_image_extensions_enabled: false,
+          tweetypie_unmention_optimization_enabled: true,
+          responsive_web_edit_tweet_api_enabled: true,
+          graphql_is_translatable_rweb_tweet_is_translatable_enabled: true,
+          view_counts_everywhere_api_enabled: true,
+          longform_notetweets_consumption_enabled: true,
+          responsive_web_twitter_article_tweet_consumption_enabled: true,
+          tweet_awards_web_tipping_enabled: false,
+          freedom_of_speech_not_reach_fetch_enabled: true,
+          standardized_nudges_misinfo: true,
+          longform_notetweets_rich_text_read_enabled: true,
+          longform_notetweets_inline_media_enabled: true,
+          responsive_web_enhance_cards_enabled: false,
+        }),
+      });
+
+      const url = `https://x.com/i/api/graphql/${queryId}/BookmarkFolders?${params}`;
+      console.log(`[Electron] GET BookmarkFolders: ${url.substring(0, 80)}...`);
+
+      const response = await sess.fetch(url, { headers });
+      console.log(`[Electron] BookmarkFolders status: ${response.status}`);
+
+      if (!response.ok) continue;
+
+      const text = await response.text();
+      if (!text) continue;
+
+      const data = JSON.parse(text);
+      const folders = parseBookmarkFolders(data);
+
+      if (folders.length > 0) {
+        console.log(`[Electron] Found ${folders.length} bookmark folders`);
+        return folders;
+      }
+    } catch (e) {
+      console.log(`[Electron] BookmarkFolders queryId=${queryId} failed:`, e.message);
+    }
   }
 
   return [];
+}
+
+function parseBookmarkFolders(data) {
+  const folders = [];
+  try {
+    // X.com BookmarkFolders response structure
+    // data.data.bookmark_collections_slice.items[] or
+    // data.data.bookmark_folders.[] etc.
+    const items =
+      data?.data?.bookmark_collections_slice?.items ||
+      data?.data?.bookmark_folders ||
+      data?.data?.bookmarkFolders ||
+      [];
+
+    for (const item of items) {
+      const folder = item?.folder || item;
+      if (!folder || !folder.id) continue;
+      folders.push({
+        id: folder.id,
+        name: folder.name || "Folder",
+        color: folder.color || "#888",
+        createdAt: new Date().toISOString(),
+      });
+    }
+
+    // Also check timeline instructions format
+    if (folders.length === 0) {
+      const instructions =
+        data?.data?.bookmark_folders_timeline?.timeline?.instructions ||
+        data?.data?.bookmark_collection_home_timeline?.timeline?.instructions ||
+        [];
+      for (const instr of instructions) {
+        for (const entry of (instr.entries || [])) {
+          const folder = entry?.content?.itemContent?.bookmark_collection || entry?.content?.itemContent?.folder;
+          if (folder && folder.id) {
+            folders.push({
+              id: folder.id,
+              name: folder.name || "Folder",
+              color: folder.coverMedia?.media_info?.original_img_url ? undefined : "#888",
+              createdAt: new Date().toISOString(),
+            });
+          }
+        }
+      }
+    }
+  } catch (e) {
+    console.error("[Electron] parseBookmarkFolders error:", e.message);
+  }
+  console.log(`[Electron] Parsed ${folders.length} folders from response`);
+  return folders;
 }
 
 function createSampleBookmarks() {

@@ -10,3 +10,5 @@
 
 4. Folders dropdown - Shows "All Bookmarks" but doesn't fetch X.com collections yet (requires API call)
 5. Other filters (Tags, Shape, Rating, Types) - Framework in place, need UI and implementation for each
+6. The imported bookmarks are still stacking and it looks like were importing the tweets into the canvas when it should only be IMAGES + VIDEOS.
+7. Reset grid layout button still does nothing. It should reset all imported images into a clean grid.
