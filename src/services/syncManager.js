@@ -131,10 +131,16 @@ export const CARD_W = 200   // must match BookmarkCard.CARD_W
 const GAP = 2               // tight 2px gap
 
 export function computeMasonryPositions(bookmarks, viewportWidth, aspectRatios = {}) {
-  const vw     = viewportWidth ?? (typeof window !== 'undefined' ? window.innerWidth : 1280)
-  const cols   = Math.max(2, Math.floor((vw + GAP) / (CARD_W + GAP)))
-  const grid   = cols * CARD_W + (cols - 1) * GAP
-  const startX = Math.max(GAP, Math.round((vw - grid) / 2))
+  const vw = viewportWidth ?? (typeof window !== 'undefined' ? window.innerWidth : 1280)
+
+  // Minimum columns to fill the viewport, then expand to sqrt(N) so the grid
+  // grows wider with more bookmarks — keeps it roughly square so users pan
+  // horizontally as well as vertically instead of just one long column.
+  const naturalCols = Math.max(2, Math.floor((vw + GAP) / (CARD_W + GAP)))
+  const squareCols  = Math.ceil(Math.sqrt(bookmarks.length))
+  const cols        = Math.max(naturalCols, squareCols)
+
+  const startX = GAP
   const colH   = new Array(cols).fill(GAP)
 
   const placed = []
