@@ -68,8 +68,12 @@ export async function syncBookmarks(onProgress, testMode = false) {
 
     onProgress?.(`Processing ${bookmarks.length} bookmarks...`)
 
+    // Filter to media-only (images/videos) — text-only bookmarks don't display
+    const mediaBookmarks = bookmarks.filter(b => b.thumbnail || b.videoUrl)
+    console.log(`[Sync] ${bookmarks.length} total → ${mediaBookmarks.length} with media`)
+
     // Compute masonry positions (renderer process has window dimensions)
-    const validatedBookmarks = computeMasonryPositions(bookmarks)
+    const validatedBookmarks = computeMasonryPositions(mediaBookmarks)
 
     // Save all bookmarks
     await saveBookmarks(validatedBookmarks)
