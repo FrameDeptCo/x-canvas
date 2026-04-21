@@ -199,14 +199,16 @@ ipcMain.handle("logout", async () => {
   return { success: true };
 });
 
-// Intercept the actual bookmark API call from the x.com page and return the parsed bookmarks
-async function captureBookmarksFromPage(sess) {
+// ─── PRIMARY method: load the real X.com bookmarks page, use CDP to capture
+// every GraphQL /Bookmarks response body, and scroll to trigger all pages.
+// This is the most reliable approach because X.com's own JS handles auth.
+async function captureAllBookmarksViaCDP(sess) {
   return new Promise((resolve) => {
-    console.log("[Electron] Loading x.com/i/bookmarks to capture API response...");
+    console.log("[Electron] CDP capture: loading x.com/i/bookmarks...");
 
-    const hiddenWindow = new BrowserWindow({
+    const win = new BrowserWindow({
       width: 1280,
-      height: 800,
+      height: 900,
       show: false,
       webPreferences: {
         nodeIntegration: false,
@@ -215,54 +217,112 @@ async function captureBookmarksFromPage(sess) {
       },
     });
 
+    const allBookmarks = [];
+    const seenIds = new Set();
     let resolved = false;
-    const done = (result) => {
+    let scrollInterval = null;
+    let stableCount = 0;
+    let lastBookmarkCount = 0;
+
+    const finish = (reason) => {
       if (resolved) return;
       resolved = true;
-      hiddenWindow.destroy();
-      resolve(result);
+      clearInterval(scrollInterval);
+      clearTimeout(hardTimeout);
+      try { win.webContents.debugger.detach(); } catch (_) {}
+      win.destroy();
+      console.log(`[Electron] CDP done (${reason}): ${allBookmarks.length} total bookmarks`);
+      resolve(allBookmarks);
     };
 
-    const timeout = setTimeout(() => {
-      console.log("[Electron] Page capture timed out");
-      done(null);
-    }, 30000);
+    // Hard timeout — 90 seconds max
+    const hardTimeout = setTimeout(() => finish("timeout"), 90000);
 
-    // Intercept the GraphQL bookmarks & folders responses
-    sess.webRequest.onCompleted(
-      { urls: ["https://x.com/i/api/graphql/*/*"] },
-      async (details) => {
-        const bookmarksMatch = details.url.match(/graphql\/([^/]+)\/Bookmarks/);
-        if (bookmarksMatch) {
-          capturedQueryId = bookmarksMatch[1];
-          console.log(`[Electron] Captured Bookmarks query ID: ${capturedQueryId}`);
+    // Attach CDP debugger and enable Network domain
+    try {
+      win.webContents.debugger.attach("1.3");
+    } catch (e) {
+      console.error("[Electron] CDP attach failed:", e.message);
+      resolve([]);
+      return;
+    }
+
+    // Listen for network responses
+    win.webContents.debugger.on("message", async (_event, method, params) => {
+      if (method !== "Network.responseReceived") return;
+      const url = params.response?.url || "";
+      if (!url.includes("/Bookmarks") || !url.includes("/graphql/")) return;
+
+      // Capture query ID
+      const qm = url.match(/graphql\/([^/?]+)\/Bookmarks/);
+      if (qm) capturedQueryId = qm[1];
+
+      // Also capture bearer token from response headers
+      const auth = params.response?.requestHeaders?.authorization || params.response?.requestHeaders?.Authorization;
+      if (auth && auth.startsWith("Bearer ")) capturedBearerToken = auth;
+
+      try {
+        const body = await win.webContents.debugger.sendCommand("Network.getResponseBody", {
+          requestId: params.requestId,
+        });
+        const raw = body.base64Encoded ? Buffer.from(body.body, "base64").toString("utf8") : body.body;
+        if (!raw) return;
+
+        const data = JSON.parse(raw);
+        const { bookmarks: pageBMs } = parseGraphQLBookmarks(data, allBookmarks.length);
+
+        let added = 0;
+        for (const bm of pageBMs) {
+          if (!seenIds.has(bm.id)) {
+            seenIds.add(bm.id);
+            allBookmarks.push(bm);
+            added++;
+          }
         }
-        const foldersMatch = details.url.match(/graphql\/([^/]+)\/BookmarkFolders/);
-        if (foldersMatch) {
-          capturedFolderQueryId = foldersMatch[1];
-          console.log(`[Electron] Captured BookmarkFolders query ID: ${capturedFolderQueryId}`);
-        }
-        if (!resolved && (bookmarksMatch || foldersMatch)) {
-          setTimeout(() => {
-            if (!resolved) done({ queryId: capturedQueryId });
-          }, 1500);
-        }
+        console.log(`[Electron] CDP intercepted page: +${added} new (total=${allBookmarks.length})`);
+      } catch (e) {
+        console.error("[Electron] CDP body read error:", e.message);
       }
-    );
-
-    hiddenWindow.on("closed", () => {
-      clearTimeout(timeout);
-      sess.webRequest.onCompleted(null); // remove listener
-      done(null);
     });
 
-    hiddenWindow.loadURL("https://x.com/i/bookmarks");
+    win.webContents.debugger.sendCommand("Network.enable").catch(console.error);
+
+    win.webContents.on("did-finish-load", () => {
+      console.log("[Electron] Page loaded, starting scroll loop...");
+
+      // Scroll down every 1.5s to trigger infinite loading
+      scrollInterval = setInterval(async () => {
+        if (resolved) return;
+        try {
+          await win.webContents.executeJavaScript(
+            "window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'smooth' })"
+          );
+        } catch (_) {}
+
+        const current = allBookmarks.length;
+        if (current === lastBookmarkCount) {
+          stableCount++;
+          console.log(`[Electron] No new bookmarks for ${stableCount}s (total=${current})`);
+          // After 8 stable seconds with at least some bookmarks, or 15 stable seconds total, stop
+          if ((stableCount >= 8 && current > 0) || stableCount >= 15) {
+            finish("stable");
+          }
+        } else {
+          stableCount = 0;
+          lastBookmarkCount = current;
+        }
+      }, 1500);
+    });
+
+    win.on("closed", () => finish("window-closed"));
+    win.webContents.loadURL("https://x.com/i/bookmarks");
   });
 }
 
 async function ensureBearerToken(sess) {
   if (capturedBearerToken) return capturedBearerToken;
-  await captureBookmarksFromPage(sess);
+  // Load the page briefly to capture the bearer token
+  const bookmarks = await captureAllBookmarksViaCDP(sess);
   return capturedBearerToken;
 }
 
@@ -318,83 +378,57 @@ async function discoverQueryId(sess, cookieStr, bearerToken) {
 }
 
 ipcMain.handle("fetch-bookmarks", async (_, cookie) => {
-  console.log("[Electron] Fetching bookmarks via X.com API");
+  console.log("[Electron] Fetching bookmarks — primary: CDP page capture");
 
   try {
     const sess = mainWindow
       ? mainWindow.webContents.session
       : electronSession.defaultSession;
 
-    // Get cookies from session
-    const sessionCookies = await sess.cookies.get({ url: "https://x.com" });
-    const ct0Cookie = sessionCookies.find((c) => c.name === "ct0");
-    const ct0 = ct0Cookie?.value || extractCt0FromString(cookie);
+    // ── STEP 1: CDP capture (most reliable — uses X.com's own JS + scrolls) ─
+    let bookmarks = await captureAllBookmarksViaCDP(sess);
+    console.log(`[Electron] CDP capture returned ${bookmarks.length} bookmarks`);
 
-    if (!ct0) {
-      console.error("[Electron] No ct0 cookie found - user may not be logged in");
-    }
+    // ── STEP 2: Fallback — manual GraphQL pagination if CDP got < 10 ────────
+    if (bookmarks.length < 10) {
+      console.log("[Electron] CDP got too few, falling back to manual GraphQL pagination...");
 
-    // Build cookie string: prefer session cookies (most up-to-date)
-    const cookieStr =
-      sessionCookies.length > 0
-        ? sessionCookies.map((c) => `${c.name}=${c.value}`).join("; ")
+      const sessionCookies = await sess.cookies.get({ url: "https://x.com" });
+      const ct0 = sessionCookies.find(c => c.name === "ct0")?.value || extractCt0FromString(cookie);
+      const cookieStr = sessionCookies.length > 0
+        ? sessionCookies.map(c => `${c.name}=${c.value}`).join("; ")
         : cookie || "";
 
-    console.log("[Electron] ct0:", ct0 ? "found" : "missing");
+      const bearerToken = capturedBearerToken ||
+        "Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA";
 
-    // Ensure we have a bearer token by loading X.com if needed
-    const capturedToken = await ensureBearerToken(sess);
+      const discoveredId = await discoverQueryId(sess, cookieStr, bearerToken);
+      const queryIds = [capturedQueryId, discoveredId,
+        "Fy0QMy4q_aZCpkO0PnyLYw", "HuTx74BxAnezK1D2HLp9-A", "Uv_m_cBXJL1lVXcgX0-u8Q",
+      ].filter(Boolean);
 
-    // Bearer token - use captured one or well-known fallback
-    const bearerToken =
-      capturedToken ||
-      "Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA";
-
-    console.log("[Electron] Using bearer token:", bearerToken.substring(0, 40) + "...");
-
-    // Discover current query ID, then fall back to known ones
-    const discoveredId = await discoverQueryId(sess, cookieStr, bearerToken);
-    const queryIds = [
-      capturedQueryId,   // intercepted from actual page load
-      discoveredId,      // found in JS bundle
-      "Fy0QMy4q_aZCpkO0PnyLYw",
-      "HuTx74BxAnezK1D2HLp9-A",
-      "Uv_m_cBXJL1lVXcgX0-u8Q",
-    ].filter(Boolean);
-    console.log("[Electron] Query IDs to try:", queryIds);
-
-    let bookmarks = [];
-
-    for (const queryId of queryIds) {
-      try {
-        bookmarks = await fetchBookmarksGraphQL(sess, queryId, cookieStr, ct0, bearerToken);
-        if (bookmarks.length > 0) {
-          console.log(`[Electron] Got ${bookmarks.length} bookmarks via GraphQL queryId=${queryId}`);
-          break;
+      for (const queryId of queryIds) {
+        try {
+          const gqlBMs = await fetchBookmarksGraphQL(sess, queryId, cookieStr, ct0, bearerToken);
+          if (gqlBMs.length > bookmarks.length) {
+            bookmarks = gqlBMs;
+            console.log(`[Electron] Fallback GraphQL got ${bookmarks.length} bookmarks`);
+            break;
+          }
+        } catch (e) {
+          console.log(`[Electron] Fallback queryId=${queryId} failed:`, e.message);
         }
-      } catch (e) {
-        console.log(`[Electron] GraphQL queryId=${queryId} failed:`, e.message);
       }
     }
 
-    // If GraphQL failed, try v2 timeline API
-    if (bookmarks.length === 0) {
-      try {
-        bookmarks = await fetchBookmarksV2(sess, cookieStr, ct0, bearerToken);
-        console.log(`[Electron] Got ${bookmarks.length} bookmarks via v2 API`);
-      } catch (e) {
-        console.error("[Electron] v2 API also failed:", e.message);
-      }
-    }
-
-    // Deduplicate by id (pages can sometimes overlap by 1)
+    // Deduplicate
     const seen = new Set();
     bookmarks = bookmarks.filter(b => {
       if (seen.has(b.id)) return false;
       seen.add(b.id);
       return true;
     });
-    console.log("[Electron] Total bookmarks found (deduplicated):", bookmarks.length);
+    console.log("[Electron] Final bookmark count (deduplicated):", bookmarks.length);
 
     // Try to fetch user's lists/collections
     let collections = [
