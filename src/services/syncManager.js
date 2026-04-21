@@ -134,13 +134,10 @@ export function computeMasonryPositions(bookmarks, viewportWidth, aspectRatios =
   const colH   = new Array(cols).fill(GAP)
 
   const placed = []
+  const defaultRatio = 16 / 9 // use default 16:9 for bookmarks without known aspect ratio
 
   for (const bm of bookmarks) {
-    const ratio = aspectRatios[bm.id]
-    // Only place cards whose actual aspect ratio we know — avoids phantom gaps
-    // from cards that haven't loaded yet using the wrong estimated height
-    if (!ratio) continue
-
+    const ratio = aspectRatios[bm.id] || defaultRatio
     const cardH = Math.round(CARD_W / ratio)
     const minH  = Math.min(...colH)
     const col   = colH.indexOf(minH)
