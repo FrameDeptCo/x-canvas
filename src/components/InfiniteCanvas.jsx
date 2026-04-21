@@ -3,7 +3,7 @@ import { Stage, Layer, Text } from 'react-konva'
 import { useAppStore } from '../store/appState'
 import BookmarkCard from './BookmarkCard'
 
-const HEADER_H = 74  // nav row (42) + filter chips row (32)
+const HEADER_H = 0  // no header — canvas fills full viewport
 
 const InfiniteCanvas = ({ bookmarks, panelOpen }) => {
   const stageRef    = useRef(null)

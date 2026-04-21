@@ -3,7 +3,7 @@ import { useAppStore } from './store/appState'
 import { getLocalBookmarks, getLocalFolders, computeMasonryPositions } from './services/syncManager'
 import { initDB, saveBookmarks } from './db/bookmarkStore'
 import { isColorSimilar } from './utils/colorUtils'
-import Header from './components/Header'
+import HUD from './components/HUD'
 import InfiniteCanvas from './components/InfiniteCanvas'
 import InfoPanel from './components/InfoPanel'
 import LoginForm from './components/LoginForm'
@@ -145,33 +145,26 @@ function App() {
   if (showLogin) return <LoginForm onSave={() => setShowLogin(false)} />
 
   return (
-    <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', background: '#0a0a0a', overflow: 'hidden' }}>
+    <div style={{ height: '100vh', position: 'relative', background: '#0a0a0a', overflow: 'hidden', display: 'flex' }}>
 
-      <Header
-        folders={folders}
-        onSync={handleSync}
-        onLogin={() => setShowLogin(true)}
-        onArrange={handleArrange}
-        panelOpen={panelOpen}
-      />
-
-      {/* Canvas + panel side-by-side */}
-      <div style={{ flex: 1, position: 'relative', overflow: 'hidden', display: 'flex' }}>
-        <div style={{ flex: 1, overflow: 'hidden' }}>
-          <InfiniteCanvas
-            bookmarks={filteredBookmarks}
-            panelOpen={panelOpen}
-          />
-        </div>
-
-        {/* Info panel slides in from right */}
-        {panelOpen && (
-          <InfoPanel
-            bookmark={selectedBookmark}
-            onClose={clearSelected}
-          />
-        )}
+      <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
+        <InfiniteCanvas
+          bookmarks={filteredBookmarks}
+          panelOpen={panelOpen}
+        />
+        <HUD
+          onSync={handleSync}
+          onArrange={handleArrange}
+          panelOpen={panelOpen}
+        />
       </div>
+
+      {panelOpen && (
+        <InfoPanel
+          bookmark={selectedBookmark}
+          onClose={clearSelected}
+        />
+      )}
 
     </div>
   )
