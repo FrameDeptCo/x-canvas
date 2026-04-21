@@ -89,9 +89,11 @@ const InfiniteCanvas = ({ bookmarks, panelOpen }) => {
     setCanvasZoom(newZoom)
   }
 
-  // ── Pan on stage drag ─────────────────────────────────────────────────────
+  // ── Pan: left-click on empty canvas OR right-click anywhere ─────────────
   const onMouseDown = (e) => {
-    if (e.target !== stageRef.current) return   // only empty canvas
+    const isRightClick = e.evt.button === 2
+    const isEmptyCanvas = e.target === stageRef.current
+    if (!isRightClick && !isEmptyCanvas) return
     isPanning.current = true
     lastPtr.current   = { x: e.evt.clientX, y: e.evt.clientY }
   }
@@ -105,6 +107,9 @@ const InfiniteCanvas = ({ bookmarks, panelOpen }) => {
   }
 
   const stopPan = () => { isPanning.current = false }
+
+  // ── Suppress context menu so right-click drag feels native ───────────────
+  const onContextMenu = (e) => { e.evt.preventDefault() }
 
   // ── Click empty canvas → deselect ─────────────────────────────────────────
   const onStageClick = (e) => {
@@ -125,6 +130,7 @@ const InfiniteCanvas = ({ bookmarks, panelOpen }) => {
       onMouseUp={stopPan}
       onMouseLeave={stopPan}
       onClick={onStageClick}
+      onContextMenu={onContextMenu}
     >
       <Layer x={canvasPan.x} y={canvasPan.y} scaleX={canvasZoom} scaleY={canvasZoom}>
         {bookmarks?.length > 0 ? (
