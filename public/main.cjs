@@ -69,6 +69,17 @@ app.on("ready", async () => {
   await initStore();
   createWindow();
 
+  // Fix CORS for Twitter media (videos + images) so renderer can load them
+  electronSession.defaultSession.webRequest.onHeadersReceived(
+    { urls: ["https://video.twimg.com/*", "https://pbs.twimg.com/*", "https://abs.twimg.com/*"] },
+    (details, callback) => {
+      const headers = { ...details.responseHeaders };
+      headers["access-control-allow-origin"] = ["*"];
+      headers["access-control-allow-methods"] = ["GET, HEAD, OPTIONS"];
+      callback({ responseHeaders: headers });
+    }
+  );
+
   // Intercept X.com API requests to capture bearer token and query IDs
   electronSession.defaultSession.webRequest.onBeforeSendHeaders(
     { urls: ["https://x.com/i/api/*", "https://api.x.com/*", "https://twitter.com/i/api/*"] },

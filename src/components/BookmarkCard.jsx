@@ -1,17 +1,15 @@
 import React, { useState, useEffect, useRef } from 'react'
-import { Group, Rect, Image as KonvaImage, Text } from 'react-konva'
+import { Group, Rect, Image as KonvaImage } from 'react-konva'
 import { useAppStore } from '../store/appState'
 import { extractDominantColor } from '../utils/colorUtils'
 import { updateBookmarkPosition } from '../db/bookmarkStore'
 
 export const CARD_W  = 200
 const RADIUS         = 4
-const TEXT_CARD_H    = 120   // height for text-only bookmarks
 
 const BookmarkCard = ({ bookmark, onSelect, isSelected }) => {
   const [image,      setImage]      = useState(null)
   const [imgAspect,  setImgAspect]  = useState(16 / 9)
-  const [isDragging, setIsDragging] = useState(false)
   const wasDragged   = useRef(false)
   const videoRef     = useRef(null)
   const setAspectRatio = useAppStore(s => s.setAspectRatio)
@@ -85,18 +83,22 @@ const BookmarkCard = ({ bookmark, onSelect, isSelected }) => {
   // ── Height ────────────────────────────────────────────────────────────────
   const hasImg  = !!image
   const imgH    = hasImg ? Math.round(CARD_W / imgAspect) : 0
-  const CARD_H  = hasImg ? imgH : TEXT_CARD_H
+  const CARD_H  = imgH
+
+  // ── Don't render until media has loaded ──────────────────────────────────
+  // Media bookmarks show nothing until image/video is ready.
+  // This keeps the canvas images/video only.
+  const hasMedia = !!(bookmark.thumbnail || bookmark.videoUrl)
+  if (hasMedia && !hasImg) return null
 
   // ── Drag ─────────────────────────────────────────────────────────────────
   const onDragStart = () => {
     wasDragged.current = false
-    setIsDragging(true)
   }
   const onDragMove = () => {
     wasDragged.current = true
   }
   const onDragEnd = (e) => {
-    setIsDragging(false)
     const p = { x: e.target.x(), y: e.target.y() }
     setPos(p)
     updateBookmarkPosition(bookmark.id, p.x, p.y).catch(console.error)
@@ -107,11 +109,6 @@ const BookmarkCard = ({ bookmark, onSelect, isSelected }) => {
     if (wasDragged.current) return
     onSelect?.(bookmark)
   }
-
-  // ── Text-only card (no image) ─────────────────────────────────────────────
-  const authorName = (bookmark.authorName && bookmark.authorName !== 'Unknown')
-    ? bookmark.authorName
-    : bookmark.author || ''
 
   return (
     <Group
@@ -138,49 +135,14 @@ const BookmarkCard = ({ bookmark, onSelect, isSelected }) => {
         />
       )}
 
-      {hasImg ? (
-        /* ── Image / video thumbnail ── */
-        <KonvaImage
-          image={image}
-          x={0} y={0}
-          width={CARD_W}
-          height={imgH}
-          cornerRadius={RADIUS}
-        />
-      ) : (
-        /* ── Text-only card ── */
-        <>
-          <Rect
-            x={0} y={0}
-            width={CARD_W}
-            height={TEXT_CARD_H}
-            fill="#1e1e1e"
-            cornerRadius={RADIUS}
-          />
-          {authorName && (
-            <Text
-              x={10} y={10}
-              text={authorName}
-              fontSize={10}
-              fontStyle="bold"
-              fill="#666"
-              width={CARD_W - 20}
-              ellipsis
-            />
-          )}
-          <Text
-            x={10} y={26}
-            text={bookmark.text || ''}
-            fontSize={10}
-            fill="#aaa"
-            lineHeight={1.5}
-            width={CARD_W - 20}
-            height={TEXT_CARD_H - 36}
-            ellipsis
-            wrap="word"
-          />
-        </>
-      )}
+      {/* ── Image / video thumbnail ── */}
+      <KonvaImage
+        image={image}
+        x={0} y={0}
+        width={CARD_W}
+        height={imgH}
+        cornerRadius={RADIUS}
+      />
     </Group>
   )
 }
