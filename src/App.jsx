@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { useAppStore } from './store/appState'
 import { getLocalBookmarks, getLocalFolders, computeMasonryPositions } from './services/syncManager'
 import { initDB, saveBookmarks } from './db/bookmarkStore'
+import { isColorSimilar } from './utils/colorUtils'
 import Header from './components/Header'
 import InfiniteCanvas from './components/InfiniteCanvas'
 import InfoPanel from './components/InfoPanel'
@@ -19,6 +20,8 @@ function App() {
   const selectedBookmark    = useAppStore(s => s.selectedBookmark)
   const clearSelected       = useAppStore(s => s.clearSelectedBookmark)
   const aspectRatios        = useAppStore(s => s.aspectRatios)
+  const activeFilters       = useAppStore(s => s.activeFilters)
+  const bookmarkColors      = useAppStore(s => s.bookmarkColors)
 
   const panelOpen = !!selectedBookmark
 
@@ -77,10 +80,29 @@ function App() {
     setBookmarks_(arranged)
   }
 
-  // ── Folder filter ─────────────────────────────────────────────────────────
-  const filteredBookmarks = selectedFolder === 'all'
-    ? bookmarks
-    : bookmarks.filter(b => b.folderId === selectedFolder)
+  // ── Filters (folder + color + others) ─────────────────────────────────────
+  const filteredBookmarks = bookmarks.filter(b => {
+    // Folder filter
+    if (selectedFolder !== 'all' && b.folderId !== selectedFolder) return false
+
+    // Color filter
+    if (activeFilters.color) {
+      const bColor = bookmarkColors[b.id]
+      if (!bColor || !isColorSimilar(bColor, activeFilters.color)) return false
+    }
+
+    // Tag filter (future)
+    if (activeFilters.tags.length > 0) {
+      // TODO: implement when bookmarks have tags
+    }
+
+    // Type filter (future - filter by image/video/text)
+    if (activeFilters.types.length > 0) {
+      // TODO: implement when we track bookmark types
+    }
+
+    return true
+  })
 
   if (!isInitialized) return (
     <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#0a0a0a', color: '#333', fontSize: 13 }}>

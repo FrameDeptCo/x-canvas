@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { Group, Rect, Image as KonvaImage, Text } from 'react-konva'
 import { useAppStore } from '../store/appState'
+import { extractDominantColor } from '../utils/colorUtils'
 import { updateBookmarkPosition } from '../db/bookmarkStore'
 
 export const CARD_W  = 200
@@ -14,6 +15,7 @@ const BookmarkCard = ({ bookmark, onSelect, isSelected }) => {
   const wasDragged   = useRef(false)
   const videoRef     = useRef(null)
   const setAspectRatio = useAppStore(s => s.setAspectRatio)
+  const setBookmarkColor = useAppStore(s => s.setBookmarkColor)
 
   const validPos = {
     x: typeof bookmark.position?.x === 'number' ? bookmark.position.x : 0,
@@ -37,6 +39,9 @@ const BookmarkCard = ({ bookmark, onSelect, isSelected }) => {
         setImgAspect(ratio)
         setAspectRatio(bookmark.id, ratio)
       }
+      // Extract dominant color from video frame
+      const color = extractDominantColor(vid)
+      if (color) setBookmarkColor(bookmark.id, color)
       vid.play().catch(() => {})
       setImage(vid)
     }
@@ -63,6 +68,9 @@ const BookmarkCard = ({ bookmark, onSelect, isSelected }) => {
         setImgAspect(ratio)
         setAspectRatio(bookmark.id, ratio)
       }
+      // Extract dominant color for filtering
+      const color = extractDominantColor(img)
+      if (color) setBookmarkColor(bookmark.id, color)
     }
   }, [bookmark.thumbnail, bookmark.videoUrl, bookmark.id, setAspectRatio])
 

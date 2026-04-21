@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import { useAppStore } from '../store/appState'
 import { syncBookmarks } from '../services/syncManager'
+import ColorFilter from './ColorFilter'
 import './Header.css'
 
 // ── SVG icons ────────────────────────────────────────────────────────────────
@@ -24,12 +25,15 @@ export default function Header({ folders, onSync, onLogin, onArrange, panelOpen 
   const [isSyncing,  setIsSyncing]  = useState(false)
   const [search,     setSearch]     = useState('')
   const [activeChip, setActiveChip] = useState(null)
+  const [showColorFilter, setShowColorFilter] = useState(false)
 
-  const canvasZoom           = useAppStore(s => s.canvasZoom)
-  const setCanvasZoom        = useAppStore(s => s.setCanvasZoom)
+  const canvasZoom            = useAppStore(s => s.canvasZoom)
+  const setCanvasZoom         = useAppStore(s => s.setCanvasZoom)
   const setCanvasZoomCentered = useAppStore(s => s.setCanvasZoomCentered)
-  const selectedFolder       = useAppStore(s => s.selectedFolder)
-  const setSelectedFolder    = useAppStore(s => s.setSelectedFolder)
+  const selectedFolder        = useAppStore(s => s.selectedFolder)
+  const setSelectedFolder     = useAppStore(s => s.setSelectedFolder)
+  const activeFilters         = useAppStore(s => s.activeFilters)
+  const setColorFilter        = useAppStore(s => s.setColorFilter)
 
   const handleSync = async () => {
     setIsSyncing(true)
@@ -72,11 +76,17 @@ export default function Header({ folders, onSync, onLogin, onArrange, panelOpen 
 
   // Folder filter chip
   const handleChip = (chipId) => {
-    if (chipId === activeChip) {
+    if (chipId === 'color') {
+      setShowColorFilter(!showColorFilter)
+    } else if (chipId === activeChip) {
       setActiveChip(null)
     } else {
       setActiveChip(chipId)
     }
+  }
+
+  const handleColorFilterChange = (color) => {
+    setColorFilter(color)
   }
 
   return (
@@ -201,7 +211,7 @@ export default function Header({ folders, onSync, onLogin, onArrange, panelOpen 
         {FILTER_CHIPS.map(chip => (
           <button
             key={chip.id}
-            className={`filter-chip${activeChip === chip.id ? ' active' : ''}`}
+            className={`filter-chip${chip.id === 'color' && activeFilters.color ? ' active' : activeChip === chip.id ? ' active' : ''}`}
             onClick={() => handleChip(chip.id)}
           >
             {chip.icon}
@@ -226,6 +236,14 @@ export default function Header({ folders, onSync, onLogin, onArrange, panelOpen 
         <button className="filter-chip filter-chip--add" title="Add filter">+</button>
       </div>
 
+      {/* Color filter modal */}
+      {showColorFilter && (
+        <ColorFilter
+          activeColor={activeFilters.color}
+          onFilterChange={handleColorFilterChange}
+          onClose={() => setShowColorFilter(false)}
+        />
+      )}
     </header>
   )
 }

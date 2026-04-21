@@ -46,4 +46,23 @@ export const useAppStore = create((set) => ({
   // Aspect ratios reported by BookmarkCard on image/video load
   aspectRatios: {},
   setAspectRatio: (id, ratio) => set(s => ({ aspectRatios: { ...s.aspectRatios, [id]: ratio } })),
+
+  // Filters
+  activeFilters: {
+    color: null,
+    tags: [],
+    shape: null,
+    rating: null,
+    types: [], // e.g. ['image', 'video', 'text']
+  },
+  setColorFilter: (color) => set(s => ({ activeFilters: { ...s.activeFilters, color } })),
+  setTagsFilter: (tags) => set(s => ({ activeFilters: { ...s.activeFilters, tags } })),
+  setShapeFilter: (shape) => set(s => ({ activeFilters: { ...s.activeFilters, shape } })),
+  setRatingFilter: (rating) => set(s => ({ activeFilters: { ...s.activeFilters, rating } })),
+  setTypesFilter: (types) => set(s => ({ activeFilters: { ...s.activeFilters, types } })),
+  clearFilters: () => set({ activeFilters: { color: null, tags: [], shape: null, rating: null, types: [] } }),
+
+  // Bookmark colors (extracted from thumbnails)
+  bookmarkColors: {}, // { bookmarkId: '#RRGGBB' }
+  setBookmarkColor: (id, color) => set(s => ({ bookmarkColors: { ...s.bookmarkColors, [id]: color } })),
 }))
