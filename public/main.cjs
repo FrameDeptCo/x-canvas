@@ -1436,14 +1436,13 @@ async function fetchBookmarkFolders(sess, bearerToken, cookieStr, ct0) {
       console.log(`[Electron] GET BookmarkFolders: ${url.substring(0, 80)}...`);
 
       const response = await sess.fetch(url, { headers });
-      console.log(`[Electron] BookmarkFolders status: ${response.status}`);
+      const bodyText = await response.text();
+      console.log(`[Electron] BookmarkFolders status: ${response.status}`, bodyText.substring(0, 120));
 
       if (!response.ok) continue;
+      if (!bodyText) continue;
 
-      const text = await response.text();
-      if (!text) continue;
-
-      const data = JSON.parse(text);
+      const data = JSON.parse(bodyText);
       const folders = parseBookmarkFolders(data);
 
       if (folders.length > 0) {
