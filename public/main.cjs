@@ -1221,11 +1221,12 @@ function parseGraphQLBookmarks(data, startIdx = 0) {
               tweetData?.tweet?.core?.user_results?.result;
 
             // Safely unwrap – skip UserUnavailable (suspended/blocked accounts)
+            // Fall through to `userResult` itself as legacy if __typename is absent/unknown
             const userLegacy = userResult?.__typename === "User"
               ? userResult.legacy
               : userResult?.__typename === "UserUnavailable"
               ? null
-              : userResult?.legacy;
+              : userResult?.legacy || userResult;
 
             let screenName = userLegacy?.screen_name || "";
 
