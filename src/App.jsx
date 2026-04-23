@@ -143,10 +143,10 @@ function App() {
     // Folder filter
     if (selectedFolder !== 'all' && b.folderId !== selectedFolder) return false
 
-    // Color filter
+    // Color filter — threshold 60 gives good coverage for both swatch clicks and custom picker
     if (activeFilters.color) {
       const bColor = bookmarkColors[b.id]
-      if (!bColor || !isColorSimilar(bColor, activeFilters.color)) return false
+      if (!bColor || !isColorSimilar(bColor, activeFilters.color, 60)) return false
     }
 
     // Tag filter (future)
