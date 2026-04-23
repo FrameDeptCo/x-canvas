@@ -432,7 +432,7 @@ ipcMain.handle("fetch-likes", async (_, cookie) => {
     // Fallback: CDP — load the user's likes page and intercept responses
     if (likes.length === 0) {
       console.log("[Electron] Falling back to CDP capture for likes...");
-      likes = await captureAllLikesViaCDP(sess, userId);
+      likes = await captureAllLikesViaCDP(sess, userId, cookieStr, ct0, bearerToken);
     }
 
     const seen = new Set();
@@ -764,7 +764,7 @@ async function discoverLikesQueryId(sess, cookieStr) {
   return null;
 }
 
-async function captureAllLikesViaCDP(sess, userId) {
+async function captureAllLikesViaCDP(sess, userId, cookieStr, ct0, bearerToken) {
   return new Promise((resolve) => {
     console.log(`[Electron] CDP capture: loading likes page for userId=${userId}...`);
 
@@ -836,8 +836,31 @@ async function captureAllLikesViaCDP(sess, userId) {
     });
 
     win.on("closed", () => finish("window-closed"));
-    // Load the user's own likes page
-    win.webContents.loadURL(`https://x.com/i/likes`);
+    // Resolve username from userId then load /{username}/likes
+    (async () => {
+      try {
+        const verifyRes = await sess.fetch("https://x.com/i/api/1.1/account/verify_credentials.json", {
+          headers: {
+            authorization: bearerToken,
+            "x-csrf-token": ct0,
+            cookie: cookieStr,
+            "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+          },
+        });
+        if (verifyRes.ok) {
+          const profile = await verifyRes.json();
+          const screenName = profile.screen_name;
+          console.log(`[Electron] CDP likes: loading /${screenName}/likes`);
+          win.webContents.loadURL(`https://x.com/${screenName}/likes`);
+        } else {
+          win.webContents.loadURL(`https://x.com/i/bookmarks`); // fallback — at least captures bearer
+          finish("no-username");
+        }
+      } catch (e) {
+        console.error("[Electron] CDP likes: could not resolve username:", e.message);
+        finish("error");
+      }
+    })();
   });
 }
 
