@@ -13,6 +13,7 @@ let capturedBearerToken = null;
 let capturedQueryId = null;
 let capturedLikesQueryId = null;
 let capturedFolderQueryId = null;
+let capturedCreateBookmarkQueryId = null;
 
 // Initialize Store dynamically (it's an ESM module)
 async function initStore() {
@@ -108,6 +109,11 @@ app.on("ready", async () => {
       if (foldersMatch && foldersMatch[1]) {
         capturedFolderQueryId = foldersMatch[1];
         console.log(`[Electron] Captured BookmarkFolders query ID: ${capturedFolderQueryId}`);
+      }
+      const createBmMatch = details.url.match(/graphql\/([^/]+)\/CreateBookmark/);
+      if (createBmMatch && createBmMatch[1]) {
+        capturedCreateBookmarkQueryId = createBmMatch[1];
+        console.log(`[Electron] Captured CreateBookmark query ID: ${capturedCreateBookmarkQueryId}`);
       }
       callback({ requestHeaders: details.requestHeaders });
     }
@@ -488,33 +494,37 @@ ipcMain.handle("bookmark-tweet", async (_, tweetId, cookie) => {
       "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     };
 
-    // X.com bookmark mutation
-    const body = {
-      variables: {
-        tweet_id: tweetId,
-      },
-    };
+    // Discover CreateBookmark query ID if not already captured
+    if (!capturedCreateBookmarkQueryId) {
+      capturedCreateBookmarkQueryId = await discoverCreateBookmarkQueryId(sess, cookieStr);
+    }
 
-    // Try multiple bookmark endpoints
-    const endpoints = [
-      "https://x.com/i/api/graphql/sR3ECg7y8pB1HOnNcV_BDw/CreateBookmark",
-      "https://x.com/i/api/graphql/mKGLr86nYAaG3eFEt81oVQ/CreateBookmark",
-    ];
+    const bookmarkQueryIds = [
+      capturedCreateBookmarkQueryId,
+      "sR3ECg7y8pB1HOnNcV_BDw",
+      "mKGLr86nYAaG3eFEt81oVQ",
+      "aoDbu8NmDe1zoh5CSV4DNw",
+    ].filter(Boolean);
 
-    for (const url of endpoints) {
+    const body = { variables: { tweet_id: tweetId } };
+
+    for (const qid of bookmarkQueryIds) {
       try {
+        const url = `https://x.com/i/api/graphql/${qid}/CreateBookmark`;
         const response = await sess.fetch(url, {
           method: "POST",
           headers,
           body: JSON.stringify(body),
         });
-
         if (response.ok) {
-          console.log(`[Electron] Successfully bookmarked tweet ${tweetId}`);
+          capturedCreateBookmarkQueryId = qid; // remember the working one
+          console.log(`[Electron] Bookmarked ${tweetId} via ${qid}`);
           return { success: true };
         }
+        const txt = await response.text();
+        console.log(`[Electron] CreateBookmark ${qid} status ${response.status}: ${txt.substring(0, 100)}`);
       } catch (e) {
-        console.log(`[Electron] Endpoint ${url} failed:`, e.message);
+        console.log(`[Electron] CreateBookmark ${qid} failed:`, e.message);
       }
     }
 
@@ -724,6 +734,45 @@ async function fetchLikesGraphQL(sess, queryId, userId, cookieStr, ct0, bearerTo
   return allLikes;
 }
 
+async function discoverCreateBookmarkQueryId(sess, cookieStr) {
+  try {
+    const homeRes = await sess.fetch("https://x.com/", {
+      headers: {
+        "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        cookie: cookieStr,
+        accept: "text/html,application/xhtml+xml",
+      },
+    });
+    const html = await homeRes.text();
+    const scriptUrls = [...new Set(
+      (html.match(/https:\/\/abs\.twimg\.com\/responsive-web\/client-web\/[^"']+\.js/g) || [])
+    )].slice(0, 10);
+
+    for (const scriptUrl of scriptUrls) {
+      try {
+        const res = await sess.fetch(scriptUrl, {
+          headers: { "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
+        });
+        const js = await res.text();
+        const patterns = [
+          /queryId:"([A-Za-z0-9_-]{20,})",operationName:"CreateBookmark"/,
+          /"queryId":"([A-Za-z0-9_-]{20,})","operationName":"CreateBookmark"/,
+        ];
+        for (const p of patterns) {
+          const m = js.match(p);
+          if (m?.[1]) {
+            console.log(`[Electron] Found CreateBookmark query ID: ${m[1]}`);
+            return m[1];
+          }
+        }
+      } catch (_) {}
+    }
+  } catch (e) {
+    console.error("[Electron] discoverCreateBookmarkQueryId error:", e.message);
+  }
+  return null;
+}
+
 async function discoverLikesQueryId(sess, cookieStr) {
   try {
     console.log("[Electron] Discovering LikedTweets query ID from JS bundles...");
@@ -796,33 +845,42 @@ async function captureAllLikesViaCDP(sess, username, cookieStr, ct0, bearerToken
     try { win.webContents.debugger.attach("1.3"); }
     catch (e) { console.error("[Electron] CDP attach failed:", e.message); resolve([]); return; }
 
+    // Map requestId → url for likes responses
+    const pendingLikeRequests = new Map();
+
     win.webContents.debugger.on("message", async (_event, method, params) => {
-      if (method !== "Network.responseReceived") return;
-      const url = params.response?.url || "";
-      // Log all graphql calls so we can see what operation name X.com uses
-      if (url.includes("/graphql/")) {
-        console.log(`[Electron] GraphQL call: ${url.split("/graphql/")[1]?.split("?")[0]}`);
-      }
-      if ((!url.includes("/LikedTweets") && !url.includes("/Likes")) || !url.includes("/graphql/")) return;
-
-      const qm = url.match(/graphql\/([^/?]+)\/(LikedTweets|Likes)/);
-      if (qm) capturedLikesQueryId = qm[1];
-
-      const auth = params.response?.requestHeaders?.authorization || params.response?.requestHeaders?.Authorization;
-      if (auth?.startsWith("Bearer ")) capturedBearerToken = auth;
-
-      try {
-        const body = await win.webContents.debugger.sendCommand("Network.getResponseBody", { requestId: params.requestId });
-        const raw = body.base64Encoded ? Buffer.from(body.body, "base64").toString("utf8") : body.body;
-        if (!raw) return;
-        const data = JSON.parse(raw);
-        const { bookmarks: pageLikes } = parseGraphQLLikes(data, allLikes.length);
-        let added = 0;
-        for (const like of pageLikes) {
-          if (!seenIds.has(like.id)) { seenIds.add(like.id); allLikes.push(like); added++; }
+      if (method === "Network.responseReceived") {
+        const url = params.response?.url || "";
+        if (url.includes("/graphql/")) {
+          console.log(`[Electron] GraphQL call: ${url.split("/graphql/")[1]?.split("?")[0]}`);
         }
-        console.log(`[Electron] CDP likes intercepted: +${added} (total=${allLikes.length})`);
-      } catch (e) { console.error("[Electron] CDP likes body error:", e.message); }
+        if (url.includes("/graphql/") && (url.includes("/Likes") || url.includes("/LikedTweets"))) {
+          const qm = url.match(/graphql\/([^/?]+)\/(LikedTweets|Likes)/);
+          if (qm) capturedLikesQueryId = qm[1];
+          const auth = params.response?.requestHeaders?.authorization || params.response?.requestHeaders?.Authorization;
+          if (auth?.startsWith("Bearer ")) capturedBearerToken = auth;
+          pendingLikeRequests.set(params.requestId, url);
+        }
+        return;
+      }
+
+      // Read body only after fully loaded — avoids "No data found" on subsequent pages
+      if (method === "Network.loadingFinished") {
+        if (!pendingLikeRequests.has(params.requestId)) return;
+        pendingLikeRequests.delete(params.requestId);
+        try {
+          const body = await win.webContents.debugger.sendCommand("Network.getResponseBody", { requestId: params.requestId });
+          const raw = body.base64Encoded ? Buffer.from(body.body, "base64").toString("utf8") : body.body;
+          if (!raw) return;
+          const data = JSON.parse(raw);
+          const { bookmarks: pageLikes } = parseGraphQLLikes(data, allLikes.length);
+          let added = 0;
+          for (const like of pageLikes) {
+            if (!seenIds.has(like.id)) { seenIds.add(like.id); allLikes.push(like); added++; }
+          }
+          console.log(`[Electron] CDP likes intercepted: +${added} (total=${allLikes.length})`);
+        } catch (e) { console.error("[Electron] CDP likes body error:", e.message); }
+      }
     });
 
     win.webContents.debugger.sendCommand("Network.enable").catch(console.error);
