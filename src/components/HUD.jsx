@@ -165,13 +165,12 @@ export default function HUD({ onSync, onArrange, onRemix, panelOpen }) {
           )}
           <HudBtn onClick={handleSync} title="Sync bookmarks" disabled={isSyncing} spinning={isSyncing}>
             <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-              <path d="M12 7A5 5 0 1 1 7 2" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
-              <path d="M7 2l2.5 2.5L7 2 4.5 4.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
+              <path d="M2 2h10v11l-5-3-5 3V2z" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
             </svg>
           </HudBtn>
-          <HudBtn onClick={handleMigrate} title="Migrate likes → bookmarks" disabled={isMigrating} spinning={isMigrating}>
+          <HudBtn onClick={handleMigrate} title="Import likes to canvas" disabled={isMigrating} spinning={isMigrating}>
             <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-              <path d="M7 2v10M2 7l5 5 5-5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
+              <path d="M7 12C7 12 1.5 8.5 1.5 4.5a2.5 2.5 0 0 1 5-0c.276-.546.828-1 1.5-1a2.5 2.5 0 0 1 2.5 2.5C10.5 8.5 7 12 7 12z" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
             </svg>
           </HudBtn>
           <HudBtn onClick={onArrange} title="Reset grid layout">

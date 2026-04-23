@@ -1,115 +1,98 @@
 # x-canvas
 
-An infinite canvas app for organizing and visualizing X.com (Twitter) bookmarks.
+An Electron desktop app that syncs your X.com bookmarks **and likes** and displays them beautifully on an infinite, draggable canvas.
 
 ## Features
 
-- 🔗 **OAuth 2.0 Authentication** - Secure login with X.com
-- 📥 **Sync Bookmarks** - Fetch all your bookmarks from X.com
-- 🎨 **Infinite Canvas** - Free-form organization with zoom and pan
-- 🏷️ **Folder Organization** - Organize bookmarks into custom folders
-- 🖼️ **Rich Preview** - See tweet text, author info, and thumbnails
-- 💾 **Local Storage** - All bookmarks stored locally with IndexedDB
+- 🔖 **Sync Bookmarks** — Import all your X.com bookmarks onto the canvas
+- ❤️ **Import Likes** — Crawl your likes page and bring all liked media to the canvas
+- 🎨 **Infinite Canvas** — Free-form spatial organization with zoom and pan
+- 🖱️ **Drag to Organize** — Reposition any card anywhere on the canvas
+- 🖼️ **Rich Previews** — Images, videos, author info, and tweet text
+- 🔀 **Remix / Shuffle** — Randomly repack the grid layout
+- 💾 **Local Storage** — Everything stored locally via IndexedDB, no server needed
 
 ## Quick Start
 
 ### Prerequisites
-- Node.js 16+ and npm
+- Node.js 18+ and npm
 
 ### Installation
 
-1. Clone the repo:
 ```bash
-git clone <repo-url>
+git clone https://github.com/FrameDeptCo/x-canvas.git
 cd x-canvas
-```
-
-2. Install dependencies:
-```bash
 npm install
-```
-
-3. Set up X.com API credentials:
-   - Go to [X.com Developer Portal](https://developer.twitter.com/en/portal/dashboard)
-   - Create an app (if you haven't already)
-   - Generate API credentials
-   - Copy `.env.example` to `.env.local` and fill in your credentials:
-
-```bash
-cp .env.example .env.local
-```
-
-Edit `.env.local`:
-```
-VITE_X_CLIENT_ID=your_client_id
-VITE_X_CLIENT_SECRET=your_client_secret
-VITE_X_REDIRECT_URI=http://localhost:5173/callback
 ```
 
 ### Running
 
-Start the development server:
 ```bash
 npm run dev
 ```
 
-The app will be available at `http://localhost:5173`
+This starts both the Vite dev server and the Electron app together.
 
 ### Building
 
-Build for production:
 ```bash
 npm run build
 ```
 
-Preview production build:
-```bash
-npm run preview
-```
-
 ## Usage
 
-1. **Login** - Click "Login & Sync" button to authenticate with X.com
-2. **Sync** - After login, click "Sync Bookmarks" to fetch all your bookmarks
-3. **Explore** - Bookmarks appear on the canvas. Use mouse wheel to zoom and drag to pan
-4. **Organize** - Drag bookmark cards to reposition them on the canvas
-5. **Filter** - Use the folder dropdown to show specific folders or all bookmarks
+### Login
+Click **Login to X.com** — a browser window opens for you to log in. The app captures your session cookie automatically once you're logged in.
+
+### Sync Bookmarks 🔖
+Click the **bookmark icon** in the top-right HUD. The app fetches all your X.com bookmarks via the GraphQL API and displays them as cards on the canvas.
+
+### Import Likes ❤️
+Click the **heart icon** in the top-right HUD. On first use, you'll be prompted for your `@handle`. The app then:
+1. Opens a hidden browser window and loads your `x.com/{handle}/likes` page
+2. Scrolls through it automatically to capture all your liked tweets
+3. Saves any liked tweets with images or videos directly to your canvas
+
+> **Note:** X.com made likes private in 2024, so this works by crawling your own likes page using your active session — no public API needed.
+
+### Canvas Controls
+- **Scroll** — Zoom in/out
+- **Drag on background** — Pan the canvas
+- **Right-click drag** — Pan from anywhere (including over cards)
+- **Drag a card** — Reposition it
+- **Grid icon** — Reset to masonry layout
+- **Shuffle icon** — Remix / randomize the layout
 
 ## Architecture
 
 ```
+public/
+├── main.cjs          # Electron main process — IPC handlers, X.com API calls
+└── preload.cjs       # IPC bridge between renderer and main
+
 src/
-├── components/        # React components
-│   ├── InfiniteCanvas.jsx   # Konva-based canvas
-│   ├── BookmarkCard.jsx     # Individual bookmark cards
-│   └── Header.jsx           # UI controls
-├── services/          # External integrations
-│   ├── xTwitterAuth.js      # OAuth handler
-│   ├── xTwitterApi.js       # X.com API client
-│   └── syncManager.js       # Bookmark sync logic
-├── db/               # Database layer
-│   └── bookmarkStore.js     # IndexedDB wrapper
-├── store/            # State management
-│   └── appState.js         # Zustand store
-└── App.jsx           # Root component
+├── components/
+│   ├── HUD.jsx             # Floating controls (sync, likes, zoom, grid)
+│   ├── InfiniteCanvas.jsx  # Konva Stage — infinite zoom/pan canvas
+│   ├── BookmarkCard.jsx    # Individual tweet cards
+│   └── InfoPanel.jsx       # Side panel with tweet details
+├── services/
+│   └── syncManager.js      # Bookmark + likes sync orchestration
+├── db/
+│   └── bookmarkStore.js    # IndexedDB wrapper
+├── store/
+│   └── appState.js         # Zustand global state
+└── App.jsx                 # Root component
 ```
 
 ## Technologies
 
-- **React 18** - UI framework
-- **Vite** - Build tool
-- **Konva.js** - Canvas rendering
-- **IndexedDB** - Local data storage
-- **Zustand** - State management
-- **X.com API v2** - Bookmark data
-
-## Environment Variables
-
-| Variable | Description |
-|----------|-------------|
-| `VITE_X_CLIENT_ID` | X.com OAuth client ID |
-| `VITE_X_CLIENT_SECRET` | X.com OAuth client secret |
-| `VITE_X_REDIRECT_URI` | OAuth callback URL (default: http://localhost:5173/callback) |
+- **Electron** — Desktop shell
+- **React 18** — UI
+- **Vite** — Build tool
+- **Konva.js / react-konva** — Canvas rendering
+- **IndexedDB (idb)** — Local persistence
+- **Zustand** — State management
 
 ## License
 
