@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 import { useAppStore } from '../store/appState'
-import { syncBookmarks } from '../services/syncManager'
+import { syncBookmarks, migrateLikesToBookmarks } from '../services/syncManager'
 
 const btn = {
   background: 'rgba(20,20,20,0.75)',
@@ -36,6 +36,10 @@ const HudBtn = ({ onClick, title, disabled, spinning, children }) => (
 export default function HUD({ onSync, onArrange, onRemix, panelOpen }) {
   const [isSyncing, setIsSyncing] = useState(false)
   const [syncStatus, setSyncStatus] = useState('')
+  const [isMigrating, setIsMigrating] = useState(false)
+  const [migrateStatus, setMigrateStatus] = useState('')
+  const [showUsernamePrompt, setShowUsernamePrompt] = useState(false)
+  const [usernameInput, setUsernameInput] = useState('')
 
   const canvasZoom            = useAppStore(s => s.canvasZoom)
   const setCanvasZoomCentered = useAppStore(s => s.setCanvasZoomCentered)
@@ -66,6 +70,34 @@ export default function HUD({ onSync, onArrange, onRemix, panelOpen }) {
       setSyncStatus(`Error`)
     } finally {
       setIsSyncing(false)
+    }
+  }
+
+  const handleMigrate = () => {
+    const saved = localStorage.getItem('x_username')
+    if (saved) {
+      runMigration(saved)
+    } else {
+      setShowUsernamePrompt(true)
+    }
+  }
+
+  const runMigration = async (username) => {
+    const clean = username.replace(/^@/, '').trim()
+    localStorage.setItem('x_username', clean)
+    setShowUsernamePrompt(false)
+    setIsMigrating(true)
+    setMigrateStatus('Starting…')
+    try {
+      const result = await migrateLikesToBookmarks(setMigrateStatus, clean)
+      setMigrateStatus(`Done: ${result.bookmarked} bookmarked`)
+      onSync?.()
+      setTimeout(() => setMigrateStatus(''), 3000)
+    } catch (e) {
+      setMigrateStatus('Error')
+      console.error('[HUD] Migration error:', e)
+    } finally {
+      setIsMigrating(false)
     }
   }
 
@@ -115,7 +147,7 @@ export default function HUD({ onSync, onArrange, onRemix, panelOpen }) {
           </button>
         </div>
 
-        {/* Top-right: sync + grid */}
+        {/* Top-right: sync + grid + migrate */}
         <div style={{
           position: 'absolute', top: 20, right: 20,
           display: 'flex', gap: 6, alignItems: 'center',
@@ -126,10 +158,19 @@ export default function HUD({ onSync, onArrange, onRemix, panelOpen }) {
               {syncStatus}
             </span>
           )}
+          {migrateStatus && (
+            <span style={{ fontSize: 10, color: '#666', fontFamily: 'monospace', background: 'rgba(20,20,20,0.75)', backdropFilter: 'blur(8px)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 6, padding: '3px 8px' }}>
+              {migrateStatus}
+            </span>
+          )}
           <HudBtn onClick={handleSync} title="Sync bookmarks" disabled={isSyncing} spinning={isSyncing}>
-            <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-              <path d="M12 7A5 5 0 1 1 7 2" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
-              <path d="M7 2l2.5 2.5L7 2 4.5 4.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+              <path d="M3 2.75C3 1.784 3.784 1 4.75 1h6.5c.966 0 1.75.784 1.75 1.75v11.5a.75.75 0 0 1-1.227.579L8 11.722l-3.773 3.107A.751.751 0 0 1 3 14.25Zm1.75-.25a.25.25 0 0 0-.25.25v9.91l3.023-2.489a.75.75 0 0 1 .954 0l3.023 2.49V2.75a.25.25 0 0 0-.25-.25Z"/>
+            </svg>
+          </HudBtn>
+          <HudBtn onClick={handleMigrate} title="Import likes to canvas" disabled={isMigrating} spinning={isMigrating}>
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+              <path d="m8 14.25.345.666a.75.75 0 0 1-.69 0l-.008-.004-.018-.01a7.152 7.152 0 0 1-.31-.17 22.055 22.055 0 0 1-3.434-2.414C2.045 10.731 0 8.35 0 5.5 0 2.836 2.086 1 4.25 1 5.797 1 7.153 1.802 8 3.02 8.847 1.802 10.203 1 11.75 1 13.914 1 16 2.836 16 5.5c0 2.85-2.045 5.231-3.885 6.818a22.066 22.066 0 0 1-3.744 2.584l-.018.01-.006.003h-.002ZM4.25 2.5c-1.336 0-2.75 1.164-2.75 3 0 2.15 1.58 4.144 3.365 5.682A20.58 20.58 0 0 0 8 13.393a20.58 20.58 0 0 0 3.135-2.211C12.92 9.644 14.5 7.65 14.5 5.5c0-1.836-1.414-3-2.75-3-1.373 0-2.609.986-3.029 2.456a.749.749 0 0 1-1.442 0C6.859 3.486 5.623 2.5 4.25 2.5Z"/>
             </svg>
           </HudBtn>
           <HudBtn onClick={onArrange} title="Reset grid layout">
@@ -149,6 +190,36 @@ export default function HUD({ onSync, onArrange, onRemix, panelOpen }) {
         </div>
 
       </div>
+
+      {/* Username prompt modal */}
+      {showUsernamePrompt && (
+        <div style={{
+          position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+          background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)', zIndex: 50, pointerEvents: 'auto',
+        }}>
+          <div style={{
+            background: '#111', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 12,
+            padding: '24px 28px', display: 'flex', flexDirection: 'column', gap: 14, minWidth: 280,
+          }}>
+            <div style={{ color: '#ccc', fontSize: 13, fontFamily: 'monospace' }}>Your X username</div>
+            <input
+              autoFocus
+              value={usernameInput}
+              onChange={e => setUsernameInput(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') runMigration(usernameInput); if (e.key === 'Escape') setShowUsernamePrompt(false) }}
+              placeholder="@handle"
+              style={{
+                background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.15)',
+                borderRadius: 7, padding: '8px 12px', color: '#eee', fontSize: 13, fontFamily: 'monospace', outline: 'none',
+              }}
+            />
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <button onClick={() => setShowUsernamePrompt(false)} style={{ background: 'none', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 7, color: '#666', padding: '6px 14px', cursor: 'pointer', fontSize: 12 }}>Cancel</button>
+              <button onClick={() => runMigration(usernameInput)} style={{ background: '#1d9bf0', border: 'none', borderRadius: 7, color: '#fff', padding: '6px 14px', cursor: 'pointer', fontSize: 12 }}>Start</button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   )
 }

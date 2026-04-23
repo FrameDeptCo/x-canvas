@@ -11,7 +11,9 @@ const isMac = process.platform === "darwin";
 // Captured from network requests during login
 let capturedBearerToken = null;
 let capturedQueryId = null;
+let capturedLikesQueryId = null;
 let capturedFolderQueryId = null;
+let capturedCreateBookmarkQueryId = null;
 
 // Initialize Store dynamically (it's an ESM module)
 async function initStore() {
@@ -96,11 +98,22 @@ app.on("ready", async () => {
         capturedQueryId = bookmarksMatch[1];
         console.log(`[Electron] Captured Bookmarks query ID: ${capturedQueryId}`);
       }
+      // Capture Likes/LikedTweets query ID
+      const likesMatch = details.url.match(/graphql\/([^/]+)\/(LikedTweets|Likes)/);
+      if (likesMatch && likesMatch[1]) {
+        capturedLikesQueryId = likesMatch[1];
+        console.log(`[Electron] Captured LikedTweets query ID: ${capturedLikesQueryId}`);
+      }
       // Capture BookmarkFolders query ID
       const foldersMatch = details.url.match(/graphql\/([^/]+)\/BookmarkFolders/);
       if (foldersMatch && foldersMatch[1]) {
         capturedFolderQueryId = foldersMatch[1];
         console.log(`[Electron] Captured BookmarkFolders query ID: ${capturedFolderQueryId}`);
+      }
+      const createBmMatch = details.url.match(/graphql\/([^/]+)\/CreateBookmark/);
+      if (createBmMatch && createBmMatch[1]) {
+        capturedCreateBookmarkQueryId = createBmMatch[1];
+        console.log(`[Electron] Captured CreateBookmark query ID: ${capturedCreateBookmarkQueryId}`);
       }
       callback({ requestHeaders: details.requestHeaders });
     }
@@ -377,6 +390,240 @@ async function discoverQueryId(sess, cookieStr, bearerToken) {
   return null;
 }
 
+ipcMain.handle("fetch-likes", async (_, cookie, username) => {
+  console.log("[Electron] Fetching likes — using GraphQL pagination");
+
+  try {
+    const sess = mainWindow
+      ? mainWindow.webContents.session
+      : electronSession.defaultSession;
+
+    const sessionCookies = await sess.cookies.get({ url: "https://x.com" });
+    const ct0 = sessionCookies.find(c => c.name === "ct0")?.value || extractCt0FromString(cookie);
+    const cookieStr = sessionCookies.length > 0
+      ? sessionCookies.map(c => `${c.name}=${c.value}`).join("; ")
+      : cookie || "";
+
+    const bearerToken = capturedBearerToken ||
+      "Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA";
+
+    // Extract userId from twid cookie (format: u%3D{userId} or u={userId})
+    const twidCookie = sessionCookies.find(c => c.name === "twid");
+    const twidValue = twidCookie?.value || "";
+    const userIdMatch = twidValue.match(/u(?:%3D|=)(\d+)/);
+    const userId = userIdMatch ? userIdMatch[1] : null;
+    console.log(`[Electron] Extracted userId: ${userId}`);
+
+    if (!userId) {
+      throw new Error("Could not extract userId from session. Please make sure you are logged in.");
+    }
+
+    // Discover current LikedTweets query ID from X.com JS bundles
+    const discoveredLikesId = await discoverLikesQueryId(sess, cookieStr);
+    const queryIds = [capturedLikesQueryId, discoveredLikesId].filter(Boolean);
+
+    let likes = [];
+    for (const queryId of queryIds) {
+      try {
+        likes = await fetchLikesGraphQL(sess, queryId, userId, cookieStr, ct0, bearerToken);
+        if (likes.length > 0) {
+          console.log(`[Electron] Got ${likes.length} likes with queryId=${queryId}`);
+          break;
+        }
+      } catch (e) {
+        console.log(`[Electron] queryId=${queryId} failed:`, e.message);
+      }
+    }
+
+    // Fallback: CDP — load /{username}/likes and intercept responses
+    if (likes.length === 0 && username) {
+      console.log(`[Electron] Falling back to CDP capture for /${username}/likes...`);
+      likes = await captureAllLikesViaCDP(sess, username, cookieStr, ct0, bearerToken);
+    }
+
+    const seen = new Set();
+    likes = likes.filter(l => {
+      if (seen.has(l.id)) return false;
+      seen.add(l.id);
+      return true;
+    });
+    console.log("[Electron] Final likes count (deduplicated):", likes.length);
+
+    return {
+      success: true,
+      data: { likes },
+    };
+  } catch (error) {
+    console.error("[Electron] Error fetching likes:", error.message);
+    return {
+      success: false,
+      error: error.message,
+      data: { likes: [] },
+    };
+  }
+});
+
+ipcMain.handle("bookmark-tweets-batch", async (_, tweetIds, username) => {
+  console.log(`[Electron] Bookmarking ${tweetIds.length} tweets via in-page fetch`);
+
+  const sess = mainWindow ? mainWindow.webContents.session : electronSession.defaultSession;
+
+  // Grab session cookies before creating the window
+  const sessionCookies = await sess.cookies.get({ url: "https://x.com" });
+  const ct0 = sessionCookies.find(c => c.name === "ct0")?.value || "";
+  const bearer = capturedBearerToken || "Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA";
+  const createBmQid = capturedCreateBookmarkQueryId || "aoDbu3RHznuiSkQ9aNM67Q";
+
+  return new Promise((resolve) => {
+    const win = new BrowserWindow({
+      width: 1280, height: 900, show: false,
+      webPreferences: { nodeIntegration: false, contextIsolation: false, session: sess },
+    });
+
+    win.webContents.once("did-finish-load", async () => {
+      try {
+        const results = await win.webContents.executeJavaScript(`
+          (async () => {
+            const tweetIds = ${JSON.stringify(tweetIds)};
+            const ct0 = ${JSON.stringify(ct0)};
+            const bearerToken = ${JSON.stringify(bearer)};
+            const qid = ${JSON.stringify(createBmQid)};
+            const results = { bookmarked: 0, failed: 0, firstError: null };
+
+            for (const tweetId of tweetIds) {
+              try {
+                const res = await fetch('/i/api/graphql/' + qid + '/CreateBookmark', {
+                  method: 'POST',
+                  headers: {
+                    'content-type': 'application/json',
+                    'x-csrf-token': ct0,
+                    'x-twitter-active-user': 'yes',
+                    'x-twitter-auth-type': 'OAuth2Session',
+                    'x-twitter-client-language': 'en',
+                    'authorization': bearerToken,
+                  },
+                  body: JSON.stringify({ variables: { tweet_id: tweetId }, queryId: qid }),
+                });
+                if (res.ok) {
+                  results.bookmarked++;
+                } else {
+                  const txt = await res.text();
+                  if (!results.firstError) results.firstError = res.status + ': ' + txt.substring(0, 200);
+                  results.failed++;
+                }
+              } catch (e) {
+                if (!results.firstError) results.firstError = e.message;
+                results.failed++;
+              }
+              await new Promise(r => setTimeout(r, 300));
+            }
+            return results;
+          })()
+        `);
+        console.log(`[Electron] Batch bookmark done: ${results.bookmarked} ok, ${results.failed} failed`);
+        if (results.firstError) console.log(`[Electron] First error: ${results.firstError}`);
+        win.destroy();
+        resolve({ success: true, ...results });
+      } catch (e) {
+        console.error("[Electron] batch bookmark error:", e.message);
+        win.destroy();
+        resolve({ success: false, error: e.message, bookmarked: 0, failed: tweetIds.length });
+      }
+    });
+
+    win.webContents.loadURL(`https://x.com/${username || 'home'}`);
+  });
+});
+
+ipcMain.handle("bookmark-tweet", async (_, tweetId, cookie) => {
+  console.log(`[Electron] Bookmarking tweet ${tweetId}`);
+  try {
+    const sess = mainWindow
+      ? mainWindow.webContents.session
+      : electronSession.defaultSession;
+
+    const sessionCookies = await sess.cookies.get({ url: "https://x.com" });
+    const ct0 = sessionCookies.find(c => c.name === "ct0")?.value || extractCt0FromString(cookie);
+    const cookieStr = sessionCookies.length > 0
+      ? sessionCookies.map(c => `${c.name}=${c.value}`).join("; ")
+      : cookie || "";
+
+    const bearerToken = capturedBearerToken ||
+      "Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA";
+
+    const headers = {
+      authorization: bearerToken,
+      "x-csrf-token": ct0,
+      "x-twitter-active-user": "yes",
+      "x-twitter-auth-type": "OAuth2Session",
+      "x-twitter-client-language": "en",
+      cookie: cookieStr,
+      "content-type": "application/json",
+      referer: "https://x.com/i/likes",
+      origin: "https://x.com",
+      accept: "*/*",
+      "accept-language": "en-US,en;q=0.9",
+      "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    };
+
+    // Discover CreateBookmark query ID if not already captured
+    if (!capturedCreateBookmarkQueryId) {
+      capturedCreateBookmarkQueryId = await discoverCreateBookmarkQueryId(sess, cookieStr);
+    }
+
+    const bookmarkQueryIds = [
+      capturedCreateBookmarkQueryId,
+      "sR3ECg7y8pB1HOnNcV_BDw",
+      "mKGLr86nYAaG3eFEt81oVQ",
+      "aoDbu8NmDe1zoh5CSV4DNw",
+    ].filter(Boolean);
+
+    const body = { variables: { tweet_id: tweetId } };
+
+    for (const qid of bookmarkQueryIds) {
+      try {
+        const url = `https://x.com/i/api/graphql/${qid}/CreateBookmark`;
+        const response = await sess.fetch(url, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({ variables: { tweet_id: tweetId }, queryId: qid }),
+        });
+        if (response.ok) {
+          capturedCreateBookmarkQueryId = qid;
+          console.log(`[Electron] Bookmarked ${tweetId} via ${qid}`);
+          return { success: true };
+        }
+        const txt = await response.text();
+        console.log(`[Electron] CreateBookmark ${qid} status ${response.status}: ${txt.substring(0, 200)}`);
+      } catch (e) {
+        console.log(`[Electron] CreateBookmark ${qid} failed:`, e.message);
+      }
+    }
+
+    // Last resort: REST v1.1 bookmark endpoint
+    try {
+      const restRes = await sess.fetch("https://x.com/i/api/1.1/bookmarks/create.json", {
+        method: "POST",
+        headers: { ...headers, "content-type": "application/x-www-form-urlencoded" },
+        body: `tweet_id=${tweetId}`,
+      });
+      if (restRes.ok) {
+        console.log(`[Electron] Bookmarked ${tweetId} via REST v1.1`);
+        return { success: true };
+      }
+      const txt = await restRes.text();
+      console.log(`[Electron] REST v1.1 status ${restRes.status}: ${txt.substring(0, 200)}`);
+    } catch (e) {
+      console.log(`[Electron] REST v1.1 failed:`, e.message);
+    }
+
+    throw new Error("All bookmark endpoints failed");
+  } catch (error) {
+    console.error(`[Electron] Error bookmarking tweet ${tweetId}:`, error.message);
+    return { success: false, error: error.message };
+  }
+});
+
 ipcMain.handle("fetch-bookmarks", async (_, cookie) => {
   console.log("[Electron] Fetching bookmarks — using GraphQL pagination (primary method)");
 
@@ -504,6 +751,261 @@ const GRAPHQL_FEATURES = {
   communities_web_enable_tweet_community_results_fetch: true,
   articles_preview_enabled: true,
 };
+
+async function fetchLikesGraphQL(sess, queryId, userId, cookieStr, ct0, bearerToken) {
+  const headers = {
+    authorization: bearerToken,
+    "x-csrf-token": ct0,
+    "x-twitter-active-user": "yes",
+    "x-twitter-auth-type": "OAuth2Session",
+    "x-twitter-client-language": "en",
+    cookie: cookieStr,
+    referer: `https://x.com/i/likes`,
+    origin: "https://x.com",
+    accept: "*/*",
+    "accept-language": "en-US,en;q=0.9",
+    "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+  };
+
+  const allLikes = [];
+  let cursor = null;
+  let page = 0;
+  const MAX_PAGES = 100;
+
+  while (page < MAX_PAGES) {
+    page++;
+    const variables = {
+      userId,
+      count: 100,
+      cursor: cursor || undefined,
+      includePromotedContent: false,
+      withBirdwatchNotes: false,
+      withClientEventToken: false,
+      withVoice: true,
+      withV2Timeline: true,
+    };
+    if (!cursor) delete variables.cursor;
+
+    const params = new URLSearchParams({
+      variables: JSON.stringify(variables),
+      features: JSON.stringify(GRAPHQL_FEATURES),
+    });
+
+    const url = `https://x.com/i/api/graphql/${queryId}/LikedTweets?${params}`;
+    console.log(`[Electron] Fetching likes page ${page} for userId=${userId}, cursor=${cursor ? cursor.substring(0, 20) + "…" : "null"}`);
+
+    const response = await sess.fetch(url, { method: "GET", headers });
+    console.log(`[Electron] Page ${page} status: ${response.status}`);
+
+    if (!response.ok) {
+      const text = await response.text();
+      console.error(`[Electron] Page ${page} error:`, text.substring(0, 300));
+      throw new Error(`HTTP ${response.status}: ${text.substring(0, 200)}`);
+    }
+
+    const text = await response.text();
+    const data = JSON.parse(text);
+
+    const { bookmarks: pageLikes, nextCursor } = parseGraphQLLikes(data, allLikes.length);
+    console.log(`[Electron] Page ${page}: got ${pageLikes.length} likes, nextCursor=${nextCursor ? "yes" : "no"}`);
+
+    allLikes.push(...pageLikes);
+
+    if (!nextCursor || pageLikes.length === 0 || nextCursor === cursor) {
+      console.log(`[Electron] Likes pagination complete after ${page} pages, total=${allLikes.length}`);
+      break;
+    }
+
+    cursor = nextCursor;
+    await new Promise(r => setTimeout(r, 300));
+  }
+
+  return allLikes;
+}
+
+async function discoverCreateBookmarkQueryId(sess, cookieStr) {
+  try {
+    const homeRes = await sess.fetch("https://x.com/", {
+      headers: {
+        "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        cookie: cookieStr,
+        accept: "text/html,application/xhtml+xml",
+      },
+    });
+    const html = await homeRes.text();
+    const scriptUrls = [...new Set(
+      (html.match(/https:\/\/abs\.twimg\.com\/responsive-web\/client-web\/[^"']+\.js/g) || [])
+    )].slice(0, 10);
+
+    for (const scriptUrl of scriptUrls) {
+      try {
+        const res = await sess.fetch(scriptUrl, {
+          headers: { "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
+        });
+        const js = await res.text();
+        const patterns = [
+          /queryId:"([A-Za-z0-9_-]{20,})",operationName:"CreateBookmark"/,
+          /"queryId":"([A-Za-z0-9_-]{20,})","operationName":"CreateBookmark"/,
+        ];
+        for (const p of patterns) {
+          const m = js.match(p);
+          if (m?.[1]) {
+            console.log(`[Electron] Found CreateBookmark query ID: ${m[1]}`);
+            return m[1];
+          }
+        }
+      } catch (_) {}
+    }
+  } catch (e) {
+    console.error("[Electron] discoverCreateBookmarkQueryId error:", e.message);
+  }
+  return null;
+}
+
+async function discoverLikesQueryId(sess, cookieStr) {
+  try {
+    console.log("[Electron] Discovering LikedTweets query ID from JS bundles...");
+    const homeRes = await sess.fetch("https://x.com/", {
+      headers: {
+        "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        cookie: cookieStr,
+        accept: "text/html,application/xhtml+xml",
+      },
+    });
+    const html = await homeRes.text();
+    const scriptUrls = [...new Set(
+      (html.match(/https:\/\/abs\.twimg\.com\/responsive-web\/client-web\/[^"']+\.js/g) || [])
+    )].slice(0, 10);
+
+    for (const scriptUrl of scriptUrls) {
+      try {
+        const res = await sess.fetch(scriptUrl, {
+          headers: { "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
+        });
+        const js = await res.text();
+        const patterns = [
+          /queryId:"([A-Za-z0-9_-]{20,})",operationName:"LikedTweets"/,
+          /"queryId":"([A-Za-z0-9_-]{20,})","operationName":"LikedTweets"/,
+        ];
+        for (const p of patterns) {
+          const m = js.match(p);
+          if (m && m[1]) {
+            console.log(`[Electron] Found LikedTweets query ID: ${m[1]}`);
+            return m[1];
+          }
+        }
+      } catch (_) {}
+    }
+  } catch (e) {
+    console.error("[Electron] discoverLikesQueryId error:", e.message);
+  }
+  return null;
+}
+
+async function captureAllLikesViaCDP(sess, username, cookieStr, ct0, bearerToken) {
+  return new Promise((resolve) => {
+    console.log(`[Electron] CDP capture: loading /${username}/likes...`);
+
+    const win = new BrowserWindow({
+      width: 1280, height: 900, show: true,
+      webPreferences: { nodeIntegration: false, contextIsolation: true, session: sess },
+    });
+
+    const allLikes = [];
+    const seenIds = new Set();
+    let resolved = false;
+    let scrollInterval = null;
+    let stableCount = 0;
+    let lastCount = 0;
+
+    const finish = (reason) => {
+      if (resolved) return;
+      resolved = true;
+      clearInterval(scrollInterval);
+      clearTimeout(hardTimeout);
+      try { win.webContents.debugger.detach(); } catch (_) {}
+      win.destroy();
+      console.log(`[Electron] CDP likes done (${reason}): ${allLikes.length} total`);
+      resolve(allLikes);
+    };
+
+    const hardTimeout = setTimeout(() => finish("timeout"), 90000);
+
+    try { win.webContents.debugger.attach("1.3"); }
+    catch (e) { console.error("[Electron] CDP attach failed:", e.message); resolve([]); return; }
+
+    // Map requestId → url for likes responses
+    const pendingLikeRequests = new Map();
+
+    win.webContents.debugger.on("message", async (_event, method, params) => {
+      if (method === "Network.responseReceived") {
+        const url = params.response?.url || "";
+        if (url.includes("/graphql/")) {
+          console.log(`[Electron] GraphQL call: ${url.split("/graphql/")[1]?.split("?")[0]}`);
+        }
+        if (url.includes("/graphql/") && (url.includes("/Likes") || url.includes("/LikedTweets"))) {
+          const qm = url.match(/graphql\/([^/?]+)\/(LikedTweets|Likes)/);
+          if (qm) capturedLikesQueryId = qm[1];
+          const auth = params.response?.requestHeaders?.authorization || params.response?.requestHeaders?.Authorization;
+          if (auth?.startsWith("Bearer ")) capturedBearerToken = auth;
+          pendingLikeRequests.set(params.requestId, url);
+        }
+        return;
+      }
+
+      // Read body only after fully loaded — avoids "No data found" on subsequent pages
+      if (method === "Network.loadingFinished") {
+        if (!pendingLikeRequests.has(params.requestId)) return;
+        pendingLikeRequests.delete(params.requestId);
+        try {
+          const body = await win.webContents.debugger.sendCommand("Network.getResponseBody", { requestId: params.requestId });
+          const raw = body.base64Encoded ? Buffer.from(body.body, "base64").toString("utf8") : body.body;
+          if (!raw) return;
+          const data = JSON.parse(raw);
+          const { bookmarks: pageLikes } = parseGraphQLLikes(data, allLikes.length);
+          let added = 0;
+          for (const like of pageLikes) {
+            if (!seenIds.has(like.id)) { seenIds.add(like.id); allLikes.push(like); added++; }
+          }
+          console.log(`[Electron] CDP likes intercepted: +${added} (total=${allLikes.length})`);
+        } catch (e) { console.error("[Electron] CDP likes body error:", e.message); }
+      }
+    });
+
+    win.webContents.debugger.sendCommand("Network.enable").catch(console.error);
+
+    win.webContents.on("did-finish-load", () => {
+      scrollInterval = setInterval(async () => {
+        if (resolved) return;
+        try { await win.webContents.executeJavaScript("window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'smooth' })"); } catch (_) {}
+        const current = allLikes.length;
+        if (current === lastCount) {
+          stableCount++;
+          if ((stableCount >= 20 && current > 0) || stableCount >= 30) finish("stable");
+        } else { stableCount = 0; lastCount = current; }
+      }, 1500);
+    });
+
+    win.on("closed", () => finish("window-closed"));
+    win.webContents.loadURL(`https://x.com/${username}/likes`);
+  });
+}
+
+function parseGraphQLLikes(data, startIdx = 0) {
+  // Likes response uses user.result.timeline_v2 structure
+  const timeline =
+    data?.data?.user?.result?.timeline_v2?.timeline ||
+    data?.data?.user?.result?.timeline?.timeline ||
+    data?.data?.likes_timeline?.timeline;
+
+  if (!timeline) {
+    console.log("[Electron] Likes: no timeline found. Keys:", JSON.stringify(Object.keys(data?.data || {})));
+    return { bookmarks: [], nextCursor: null };
+  }
+
+  // Reuse bookmark parser — same tweet entry structure
+  return parseGraphQLBookmarks({ data: { bookmark_timeline_v2: { timeline } } }, startIdx);
+}
 
 async function fetchBookmarksGraphQL(sess, queryId, cookieStr, ct0, bearerToken) {
   const url = `https://x.com/i/api/graphql/${queryId}/Bookmarks`;
