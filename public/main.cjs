@@ -473,35 +473,24 @@ ipcMain.handle("bookmark-tweets-batch", async (_, tweetIds, username) => {
       webPreferences: { nodeIntegration: false, contextIsolation: false, session: sess },
     });
 
+    // Grab session cookies for ct0 and bearer before page load
+    const sessionCookies = await sess.cookies.get({ url: "https://x.com" });
+    const ct0 = sessionCookies.find(c => c.name === "ct0")?.value || "";
+    const bearer = capturedBearerToken || "Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA";
+    const createBmQid = capturedCreateBookmarkQueryId || "aoDbu3RHznuiSkQ9aNM67Q";
+
     win.webContents.once("did-finish-load", async () => {
       try {
         const results = await win.webContents.executeJavaScript(`
           (async () => {
             const tweetIds = ${JSON.stringify(tweetIds)};
-            const results = { bookmarked: 0, failed: 0 };
-
-            // Extract bearer token and ct0 from X.com's internals
-            const ct0 = document.cookie.match(/(?:^|;\\s*)ct0=([^;]+)/)?.[1] || '';
-            // Try to get bearer token from service worker or meta tags
-            const bearerToken = 'Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA';
-
-            // Discover CreateBookmark query ID by fetching main.js
-            let queryId = null;
-            try {
-              const homeHtml = await fetch('/').then(r => r.text());
-              const scripts = [...(homeHtml.match(/https:\\/\\/abs\\.twimg\\.com\\/responsive-web\\/client-web\\/[^"']+\\.js/g) || [])].slice(0, 8);
-              for (const s of scripts) {
-                try {
-                  const js = await fetch(s).then(r => r.text());
-                  const m = js.match(/queryId:"([A-Za-z0-9_-]{20,})",operationName:"CreateBookmark"/);
-                  if (m) { queryId = m[1]; break; }
-                } catch (_) {}
-              }
-            } catch (_) {}
+            const ct0 = ${JSON.stringify(ct0)};
+            const bearerToken = ${JSON.stringify(bearer)};
+            const qid = ${JSON.stringify(createBmQid)};
+            const results = { bookmarked: 0, failed: 0, firstError: null };
 
             for (const tweetId of tweetIds) {
               try {
-                const qid = queryId || 'aoDbu8NmDe1zoh5CSV4DNw';
                 const res = await fetch('/i/api/graphql/' + qid + '/CreateBookmark', {
                   method: 'POST',
                   headers: {
@@ -509,6 +498,7 @@ ipcMain.handle("bookmark-tweets-batch", async (_, tweetIds, username) => {
                     'x-csrf-token': ct0,
                     'x-twitter-active-user': 'yes',
                     'x-twitter-auth-type': 'OAuth2Session',
+                    'x-twitter-client-language': 'en',
                     'authorization': bearerToken,
                   },
                   body: JSON.stringify({ variables: { tweet_id: tweetId }, queryId: qid }),
@@ -517,10 +507,11 @@ ipcMain.handle("bookmark-tweets-batch", async (_, tweetIds, username) => {
                   results.bookmarked++;
                 } else {
                   const txt = await res.text();
-                  console.log('CreateBookmark failed', res.status, txt.substring(0, 100));
+                  if (!results.firstError) results.firstError = res.status + ': ' + txt.substring(0, 200);
                   results.failed++;
                 }
               } catch (e) {
+                if (!results.firstError) results.firstError = e.message;
                 results.failed++;
               }
               await new Promise(r => setTimeout(r, 300));
@@ -529,6 +520,7 @@ ipcMain.handle("bookmark-tweets-batch", async (_, tweetIds, username) => {
           })()
         `);
         console.log(`[Electron] Batch bookmark done: ${results.bookmarked} ok, ${results.failed} failed`);
+        if (results.firstError) console.log(`[Electron] First error: ${results.firstError}`);
         win.destroy();
         resolve({ success: true, ...results });
       } catch (e) {
