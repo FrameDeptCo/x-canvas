@@ -514,18 +514,35 @@ ipcMain.handle("bookmark-tweet", async (_, tweetId, cookie) => {
         const response = await sess.fetch(url, {
           method: "POST",
           headers,
-          body: JSON.stringify(body),
+          body: JSON.stringify({ variables: { tweet_id: tweetId }, queryId: qid }),
         });
         if (response.ok) {
-          capturedCreateBookmarkQueryId = qid; // remember the working one
+          capturedCreateBookmarkQueryId = qid;
           console.log(`[Electron] Bookmarked ${tweetId} via ${qid}`);
           return { success: true };
         }
         const txt = await response.text();
-        console.log(`[Electron] CreateBookmark ${qid} status ${response.status}: ${txt.substring(0, 100)}`);
+        console.log(`[Electron] CreateBookmark ${qid} status ${response.status}: ${txt.substring(0, 200)}`);
       } catch (e) {
         console.log(`[Electron] CreateBookmark ${qid} failed:`, e.message);
       }
+    }
+
+    // Last resort: REST v1.1 bookmark endpoint
+    try {
+      const restRes = await sess.fetch("https://x.com/i/api/1.1/bookmarks/create.json", {
+        method: "POST",
+        headers: { ...headers, "content-type": "application/x-www-form-urlencoded" },
+        body: `tweet_id=${tweetId}`,
+      });
+      if (restRes.ok) {
+        console.log(`[Electron] Bookmarked ${tweetId} via REST v1.1`);
+        return { success: true };
+      }
+      const txt = await restRes.text();
+      console.log(`[Electron] REST v1.1 status ${restRes.status}: ${txt.substring(0, 200)}`);
+    } catch (e) {
+      console.log(`[Electron] REST v1.1 failed:`, e.message);
     }
 
     throw new Error("All bookmark endpoints failed");
@@ -892,7 +909,7 @@ async function captureAllLikesViaCDP(sess, username, cookieStr, ct0, bearerToken
         const current = allLikes.length;
         if (current === lastCount) {
           stableCount++;
-          if ((stableCount >= 8 && current > 0) || stableCount >= 15) finish("stable");
+          if ((stableCount >= 20 && current > 0) || stableCount >= 30) finish("stable");
         } else { stableCount = 0; lastCount = current; }
       }, 1500);
     });
