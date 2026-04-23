@@ -7,5 +7,6 @@ contextBridge.exposeInMainWorld("api", {
   fetchBookmarks: (cookie) => ipcRenderer.invoke("fetch-bookmarks", cookie),
   fetchLikes: (cookie, username) => ipcRenderer.invoke("fetch-likes", cookie, username),
   bookmarkTweet: (tweetId, cookie) => ipcRenderer.invoke("bookmark-tweet", tweetId, cookie),
+  bookmarkTweetsBatch: (tweetIds, username) => ipcRenderer.invoke("bookmark-tweets-batch", tweetIds, username),
   logout: () => ipcRenderer.invoke("logout"),
 });

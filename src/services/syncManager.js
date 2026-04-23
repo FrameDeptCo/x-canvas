@@ -169,49 +169,21 @@ export async function migrateLikesToBookmarks(onProgress, username) {
       return { success: true, count: 0 }
     }
 
-    onProgress?.(`Found ${likes.length} likes. Starting migration...`)
+    onProgress?.(`Found ${likes.length} likes. Bookmarking via page...`)
 
+    const tweetIds = likes.map(l => l.id)
     let bookmarked = 0
     let failed = 0
 
-    for (let i = 0; i < likes.length; i++) {
-      const like = likes[i]
-      const progress = `Bookmarking ${i + 1}/${likes.length}...`
-      onProgress?.(progress)
-
-      try {
-        if (hasAPI) {
-          const res = await window.api.bookmarkTweet(like.id, cookie)
-          if (res.success) {
-            bookmarked++
-          } else {
-            failed++
-            console.warn(`[Migration] Failed to bookmark ${like.id}:`, res.error)
-          }
-        } else {
-          const res = await fetch('/api/bookmark-tweet', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ tweetId: like.id, cookie })
-          })
-          if (res.ok) {
-            bookmarked++
-          } else {
-            failed++
-          }
-        }
-      } catch (e) {
-        failed++
-        console.error(`[Migration] Error bookmarking ${like.id}:`, e.message)
-      }
-
-      // Rate limiting — 500ms between requests
-      if (i < likes.length - 1) {
-        await new Promise(r => setTimeout(r, 500))
-      }
+    if (hasAPI && window.api.bookmarkTweetsBatch) {
+      const res = await window.api.bookmarkTweetsBatch(tweetIds, username)
+      bookmarked = res.bookmarked || 0
+      failed = res.failed || 0
+    } else {
+      failed = tweetIds.length
     }
 
-    onProgress?.(`Done! Bookmarked ${bookmarked}/${likes.length} likes${failed > 0 ? ` (${failed} failed)` : ''}`)
+    onProgress?.(`Done! Bookmarked ${bookmarked}/${likes.length}${failed > 0 ? ` (${failed} failed)` : ''}`)
 
     return {
       success: true,

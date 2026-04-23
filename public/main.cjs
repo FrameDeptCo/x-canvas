@@ -463,6 +463,85 @@ ipcMain.handle("fetch-likes", async (_, cookie, username) => {
   }
 });
 
+ipcMain.handle("bookmark-tweets-batch", async (_, tweetIds, username) => {
+  console.log(`[Electron] Bookmarking ${tweetIds.length} tweets via in-page fetch`);
+
+  return new Promise((resolve) => {
+    const sess = mainWindow ? mainWindow.webContents.session : electronSession.defaultSession;
+    const win = new BrowserWindow({
+      width: 1280, height: 900, show: false,
+      webPreferences: { nodeIntegration: false, contextIsolation: false, session: sess },
+    });
+
+    win.webContents.once("did-finish-load", async () => {
+      try {
+        const results = await win.webContents.executeJavaScript(`
+          (async () => {
+            const tweetIds = ${JSON.stringify(tweetIds)};
+            const results = { bookmarked: 0, failed: 0 };
+
+            // Extract bearer token and ct0 from X.com's internals
+            const ct0 = document.cookie.match(/(?:^|;\\s*)ct0=([^;]+)/)?.[1] || '';
+            // Try to get bearer token from service worker or meta tags
+            const bearerToken = 'Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA';
+
+            // Discover CreateBookmark query ID by fetching main.js
+            let queryId = null;
+            try {
+              const homeHtml = await fetch('/').then(r => r.text());
+              const scripts = [...(homeHtml.match(/https:\\/\\/abs\\.twimg\\.com\\/responsive-web\\/client-web\\/[^"']+\\.js/g) || [])].slice(0, 8);
+              for (const s of scripts) {
+                try {
+                  const js = await fetch(s).then(r => r.text());
+                  const m = js.match(/queryId:"([A-Za-z0-9_-]{20,})",operationName:"CreateBookmark"/);
+                  if (m) { queryId = m[1]; break; }
+                } catch (_) {}
+              }
+            } catch (_) {}
+
+            for (const tweetId of tweetIds) {
+              try {
+                const qid = queryId || 'aoDbu8NmDe1zoh5CSV4DNw';
+                const res = await fetch('/i/api/graphql/' + qid + '/CreateBookmark', {
+                  method: 'POST',
+                  headers: {
+                    'content-type': 'application/json',
+                    'x-csrf-token': ct0,
+                    'x-twitter-active-user': 'yes',
+                    'x-twitter-auth-type': 'OAuth2Session',
+                    'authorization': bearerToken,
+                  },
+                  body: JSON.stringify({ variables: { tweet_id: tweetId }, queryId: qid }),
+                });
+                if (res.ok) {
+                  results.bookmarked++;
+                } else {
+                  const txt = await res.text();
+                  console.log('CreateBookmark failed', res.status, txt.substring(0, 100));
+                  results.failed++;
+                }
+              } catch (e) {
+                results.failed++;
+              }
+              await new Promise(r => setTimeout(r, 300));
+            }
+            return results;
+          })()
+        `);
+        console.log(`[Electron] Batch bookmark done: ${results.bookmarked} ok, ${results.failed} failed`);
+        win.destroy();
+        resolve({ success: true, ...results });
+      } catch (e) {
+        console.error("[Electron] batch bookmark error:", e.message);
+        win.destroy();
+        resolve({ success: false, error: e.message, bookmarked: 0, failed: tweetIds.length });
+      }
+    });
+
+    win.webContents.loadURL(`https://x.com/${username || 'home'}`);
+  });
+});
+
 ipcMain.handle("bookmark-tweet", async (_, tweetId, cookie) => {
   console.log(`[Electron] Bookmarking tweet ${tweetId}`);
   try {
