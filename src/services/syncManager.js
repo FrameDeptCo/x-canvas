@@ -171,8 +171,18 @@ export async function migrateLikesToBookmarks(onProgress, username) {
 
     onProgress?.(`Found ${likes.length} likes. Saving to canvas...`)
 
-    // Save likes directly as local bookmarks — no X.com API needed
-    const mediaLikes = likes.filter(l => l.thumbnail || l.videoUrl)
+    // Save a "Likes" folder so the folder filter can distinguish bookmarks vs likes
+    await saveFolder({
+      id: 'likes',
+      name: 'Likes',
+      color: '#f91880',
+      createdAt: new Date().toISOString(),
+    })
+
+    // Save likes directly as local bookmarks — tag them with folderId 'likes'
+    const mediaLikes = likes
+      .filter(l => l.thumbnail || l.videoUrl)
+      .map(l => ({ ...l, folderId: 'likes' }))
     const positioned = computeMasonryPositions(mediaLikes)
     await saveBookmarks(positioned)
 

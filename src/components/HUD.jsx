@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useRef } from 'react'
 import { useAppStore } from '../store/appState'
 import { syncBookmarks, migrateLikesToBookmarks } from '../services/syncManager'
 
@@ -86,6 +86,15 @@ export default function HUD({ onSync, onArrange, onRemix, panelOpen }) {
     .sort((a, b) => b[1] - a[1])
     .slice(0, 8)
     .map(([c]) => c)
+
+  // Is the active color a manual pick (not one of the auto-extracted swatches)?
+  const isCustomColor = !!(activeFilters.color && !paletteColors.includes(activeFilters.color))
+
+  // Non-default folders — determines whether the folder dropdown is shown
+  const nonDefaultFolders = folders.filter(f => f.id !== 'default')
+
+  // Ref for the hidden <input type="color"> that backs the custom picker button
+  const colorInputRef = useRef(null)
 
   const HEADER_H = 0
   const vw = () => window.innerWidth - (panelOpen ? 280 : 0)
@@ -223,21 +232,19 @@ export default function HUD({ onSync, onArrange, onRemix, panelOpen }) {
               </div>
             )}
 
-            {/* Folder filter — only when more than just "default" exists */}
-            {folders.length > 1 && (
+            {/* Folder filter — shown when there are named folders beyond "default" */}
+            {nonDefaultFolders.length > 0 && (
               <select
                 className="hud-folder-select"
                 value={selectedFolder}
                 onChange={e => setSelectedFolder(e.target.value)}
                 title="Filter by folder"
               >
-                <option value="all">All Bookmarks</option>
-                {folders
-                  .filter(f => f.id !== 'default')
-                  .map(f => (
-                    <option key={f.id} value={f.id}>{f.name}</option>
-                  ))
-                }
+                <option value="all">All</option>
+                <option value="default">Bookmarks</option>
+                {nonDefaultFolders.map(f => (
+                  <option key={f.id} value={f.id}>{f.name}</option>
+                ))}
               </select>
             )}
           </div>
@@ -312,8 +319,8 @@ export default function HUD({ onSync, onArrange, onRemix, panelOpen }) {
           </HudBtn>
         </div>
 
-        {/* ── Bottom-center: color palette filter ── */}
-        {paletteColors.length > 0 && (
+        {/* ── Bottom-center: color palette filter + custom picker ── */}
+        {(paletteColors.length > 0 || activeFilters.color) && (
           <div style={{
             position: 'absolute', bottom: 20, left: '50%', transform: 'translateX(-50%)',
             display: 'flex', alignItems: 'center', gap: 7,
@@ -346,7 +353,7 @@ export default function HUD({ onSync, onArrange, onRemix, panelOpen }) {
               return (
                 <button
                   key={color}
-                  title={`Filter by color`}
+                  title="Filter by this color"
                   onClick={() => setColorFilter(isActive ? null : color)}
                   style={{
                     width: 14, height: 14, borderRadius: '50%',
@@ -361,6 +368,37 @@ export default function HUD({ onSync, onArrange, onRemix, panelOpen }) {
                 />
               )
             })}
+
+            {/* Divider */}
+            <div style={{ width: 1, height: 14, background: 'rgba(255,255,255,0.1)', flexShrink: 0, margin: '0 1px' }} />
+
+            {/* Custom color picker — conic gradient = color wheel when idle,
+                filled with picked color when a custom color is active */}
+            <button
+              title="Pick a custom color to filter by"
+              onClick={() => colorInputRef.current?.click()}
+              style={{
+                width: 14, height: 14, borderRadius: '50%',
+                background: isCustomColor
+                  ? activeFilters.color
+                  : 'conic-gradient(#ff5e5e, #ffad36, #ffe566, #a3e635, #36d6e7, #7b68ee, #ee68b4, #ff5e5e)',
+                border: isCustomColor ? '2px solid #fff' : '1.5px solid rgba(255,255,255,0.18)',
+                cursor: 'pointer', padding: 0, flexShrink: 0,
+                transition: 'transform 100ms, border 100ms',
+                transform: isCustomColor ? 'scale(1.3)' : 'scale(1)',
+              }}
+              onMouseEnter={e => { if (!isCustomColor) e.currentTarget.style.transform = 'scale(1.15)' }}
+              onMouseLeave={e => { e.currentTarget.style.transform = isCustomColor ? 'scale(1.3)' : 'scale(1)' }}
+            />
+
+            {/* Hidden native color picker input */}
+            <input
+              ref={colorInputRef}
+              type="color"
+              defaultValue="#888888"
+              style={{ position: 'absolute', opacity: 0, width: 0, height: 0, pointerEvents: 'none' }}
+              onChange={e => setColorFilter(e.target.value)}
+            />
           </div>
         )}
 
