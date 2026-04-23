@@ -97,8 +97,8 @@ app.on("ready", async () => {
         capturedQueryId = bookmarksMatch[1];
         console.log(`[Electron] Captured Bookmarks query ID: ${capturedQueryId}`);
       }
-      // Capture LikedTweets query ID (X.com uses LikedTweets, not Likes)
-      const likesMatch = details.url.match(/graphql\/([^/]+)\/LikedTweets/);
+      // Capture Likes/LikedTweets query ID
+      const likesMatch = details.url.match(/graphql\/([^/]+)\/(LikedTweets|Likes)/);
       if (likesMatch && likesMatch[1]) {
         capturedLikesQueryId = likesMatch[1];
         console.log(`[Electron] Captured LikedTweets query ID: ${capturedLikesQueryId}`);
@@ -803,9 +803,9 @@ async function captureAllLikesViaCDP(sess, username, cookieStr, ct0, bearerToken
       if (url.includes("/graphql/")) {
         console.log(`[Electron] GraphQL call: ${url.split("/graphql/")[1]?.split("?")[0]}`);
       }
-      if (!url.includes("/LikedTweets") || !url.includes("/graphql/")) return;
+      if ((!url.includes("/LikedTweets") && !url.includes("/Likes")) || !url.includes("/graphql/")) return;
 
-      const qm = url.match(/graphql\/([^/?]+)\/LikedTweets/);
+      const qm = url.match(/graphql\/([^/?]+)\/(LikedTweets|Likes)/);
       if (qm) capturedLikesQueryId = qm[1];
 
       const auth = params.response?.requestHeaders?.authorization || params.response?.requestHeaders?.Authorization;
