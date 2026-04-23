@@ -11,6 +11,7 @@ const isMac = process.platform === "darwin";
 // Captured from network requests during login
 let capturedBearerToken = null;
 let capturedQueryId = null;
+let capturedLikesQueryId = null;
 let capturedFolderQueryId = null;
 
 // Initialize Store dynamically (it's an ESM module)
@@ -95,6 +96,12 @@ app.on("ready", async () => {
       if (bookmarksMatch && bookmarksMatch[1]) {
         capturedQueryId = bookmarksMatch[1];
         console.log(`[Electron] Captured Bookmarks query ID: ${capturedQueryId}`);
+      }
+      // Capture Likes query ID
+      const likesMatch = details.url.match(/graphql\/([^/]+)\/Likes/);
+      if (likesMatch && likesMatch[1]) {
+        capturedLikesQueryId = likesMatch[1];
+        console.log(`[Electron] Captured Likes query ID: ${capturedLikesQueryId}`);
       }
       // Capture BookmarkFolders query ID
       const foldersMatch = details.url.match(/graphql\/([^/]+)\/BookmarkFolders/);
@@ -377,6 +384,131 @@ async function discoverQueryId(sess, cookieStr, bearerToken) {
   return null;
 }
 
+ipcMain.handle("fetch-likes", async (_, cookie) => {
+  console.log("[Electron] Fetching likes — using GraphQL pagination");
+
+  try {
+    const sess = mainWindow
+      ? mainWindow.webContents.session
+      : electronSession.defaultSession;
+
+    const sessionCookies = await sess.cookies.get({ url: "https://x.com" });
+    const ct0 = sessionCookies.find(c => c.name === "ct0")?.value || extractCt0FromString(cookie);
+    const cookieStr = sessionCookies.length > 0
+      ? sessionCookies.map(c => `${c.name}=${c.value}`).join("; ")
+      : cookie || "";
+
+    const bearerToken = capturedBearerToken ||
+      "Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA";
+
+    const discoveredId = await discoverQueryId(sess, cookieStr, bearerToken);
+    const queryIds = [capturedLikesQueryId, discoveredId,
+      "Fy0QMy4q_aZCpkO0PnyLYw", "HuTx74BxAnezK1D2HLp9-A", "Uv_m_cBXJL1lVXcgX0-u8Q",
+    ].filter(Boolean);
+
+    let likes = [];
+    for (const queryId of queryIds) {
+      try {
+        likes = await fetchLikesGraphQL(sess, queryId, cookieStr, ct0, bearerToken);
+        if (likes.length > 0) {
+          console.log(`[Electron] GraphQL pagination got ${likes.length} likes`);
+          break;
+        }
+      } catch (e) {
+        console.log(`[Electron] GraphQL queryId=${queryId} failed:`, e.message);
+      }
+    }
+
+    const seen = new Set();
+    likes = likes.filter(l => {
+      if (seen.has(l.id)) return false;
+      seen.add(l.id);
+      return true;
+    });
+    console.log("[Electron] Final likes count (deduplicated):", likes.length);
+
+    return {
+      success: true,
+      data: { likes },
+    };
+  } catch (error) {
+    console.error("[Electron] Error fetching likes:", error.message);
+    return {
+      success: false,
+      error: error.message,
+      data: { likes: [] },
+    };
+  }
+});
+
+ipcMain.handle("bookmark-tweet", async (_, tweetId, cookie) => {
+  console.log(`[Electron] Bookmarking tweet ${tweetId}`);
+  try {
+    const sess = mainWindow
+      ? mainWindow.webContents.session
+      : electronSession.defaultSession;
+
+    const sessionCookies = await sess.cookies.get({ url: "https://x.com" });
+    const ct0 = sessionCookies.find(c => c.name === "ct0")?.value || extractCt0FromString(cookie);
+    const cookieStr = sessionCookies.length > 0
+      ? sessionCookies.map(c => `${c.name}=${c.value}`).join("; ")
+      : cookie || "";
+
+    const bearerToken = capturedBearerToken ||
+      "Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA";
+
+    const headers = {
+      authorization: bearerToken,
+      "x-csrf-token": ct0,
+      "x-twitter-active-user": "yes",
+      "x-twitter-auth-type": "OAuth2Session",
+      "x-twitter-client-language": "en",
+      cookie: cookieStr,
+      "content-type": "application/json",
+      referer: "https://x.com/i/likes",
+      origin: "https://x.com",
+      accept: "*/*",
+      "accept-language": "en-US,en;q=0.9",
+      "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    };
+
+    // X.com bookmark mutation
+    const body = {
+      variables: {
+        tweet_id: tweetId,
+      },
+    };
+
+    // Try multiple bookmark endpoints
+    const endpoints = [
+      "https://x.com/i/api/graphql/sR3ECg7y8pB1HOnNcV_BDw/CreateBookmark",
+      "https://x.com/i/api/graphql/mKGLr86nYAaG3eFEt81oVQ/CreateBookmark",
+    ];
+
+    for (const url of endpoints) {
+      try {
+        const response = await sess.fetch(url, {
+          method: "POST",
+          headers,
+          body: JSON.stringify(body),
+        });
+
+        if (response.ok) {
+          console.log(`[Electron] Successfully bookmarked tweet ${tweetId}`);
+          return { success: true };
+        }
+      } catch (e) {
+        console.log(`[Electron] Endpoint ${url} failed:`, e.message);
+      }
+    }
+
+    throw new Error("All bookmark endpoints failed");
+  } catch (error) {
+    console.error(`[Electron] Error bookmarking tweet ${tweetId}:`, error.message);
+    return { success: false, error: error.message };
+  }
+});
+
 ipcMain.handle("fetch-bookmarks", async (_, cookie) => {
   console.log("[Electron] Fetching bookmarks — using GraphQL pagination (primary method)");
 
@@ -504,6 +636,79 @@ const GRAPHQL_FEATURES = {
   communities_web_enable_tweet_community_results_fetch: true,
   articles_preview_enabled: true,
 };
+
+async function fetchLikesGraphQL(sess, queryId, cookieStr, ct0, bearerToken) {
+  const url = `https://x.com/i/api/graphql/${queryId}/Likes`;
+  const headers = {
+    authorization: bearerToken,
+    "x-csrf-token": ct0,
+    "x-twitter-active-user": "yes",
+    "x-twitter-auth-type": "OAuth2Session",
+    "x-twitter-client-language": "en",
+    cookie: cookieStr,
+    "content-type": "application/json",
+    referer: "https://x.com/i/likes",
+    origin: "https://x.com",
+    accept: "*/*",
+    "accept-language": "en-US,en;q=0.9",
+    "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+  };
+
+  const allLikes = [];
+  let cursor = null;
+  let page = 0;
+  const MAX_PAGES = 100;
+
+  while (page < MAX_PAGES) {
+    page++;
+    const body = {
+      variables: {
+        count: 100,
+        cursor: cursor,
+        includePromotedContent: false,
+        withBirdwatchNotes: false,
+        withClientEventToken: false,
+        withVoice: true,
+        withV2Timeline: true,
+      },
+      features: GRAPHQL_FEATURES,
+    };
+
+    console.log(`[Electron] Fetching likes page ${page}, cursor=${cursor ? cursor.substring(0, 30) + "…" : "null"}`);
+
+    const response = await sess.fetch(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(body),
+    });
+
+    console.log(`[Electron] Page ${page} status: ${response.status}`);
+
+    if (!response.ok) {
+      const text = await response.text();
+      console.error(`[Electron] Page ${page} error:`, text.substring(0, 300));
+      throw new Error(`HTTP ${response.status}: ${text.substring(0, 200)}`);
+    }
+
+    const text = await response.text();
+    const data = JSON.parse(text);
+
+    const { bookmarks: pageLikes, nextCursor } = parseGraphQLBookmarks(data, allLikes.length);
+    console.log(`[Electron] Page ${page}: got ${pageLikes.length} likes, nextCursor=${nextCursor ? "yes" : "no"}`);
+
+    allLikes.push(...pageLikes);
+
+    if (!nextCursor || pageLikes.length === 0 || nextCursor === cursor) {
+      console.log(`[Electron] Likes pagination complete after ${page} pages, total=${allLikes.length}`);
+      break;
+    }
+
+    cursor = nextCursor;
+    await new Promise(r => setTimeout(r, 300));
+  }
+
+  return allLikes;
+}
 
 async function fetchBookmarksGraphQL(sess, queryId, cookieStr, ct0, bearerToken) {
   const url = `https://x.com/i/api/graphql/${queryId}/Bookmarks`;

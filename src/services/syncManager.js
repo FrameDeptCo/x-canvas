@@ -126,6 +126,105 @@ export async function addCustomFolder(name, color) {
   return folder
 }
 
+export async function migrateLikesToBookmarks(onProgress) {
+  try {
+    onProgress?.('Fetching session cookie...')
+
+    const hasAPI = typeof window !== 'undefined' && window.api
+    let cookie
+
+    if (hasAPI) {
+      cookie = await window.api.getSessionCookie()
+    } else {
+      cookie = localStorage.getItem('x_session_cookie')
+    }
+
+    if (!cookie) {
+      throw new Error('No session cookie found. Please login first.')
+    }
+
+    onProgress?.('Fetching all likes from X...')
+    let result
+
+    if (hasAPI) {
+      result = await window.api.fetchLikes(cookie)
+    } else {
+      const response = await fetch('/api/fetch-likes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cookie })
+      })
+      result = await response.json()
+    }
+
+    if (!result.success) {
+      throw new Error(result.error || 'Failed to fetch likes')
+    }
+
+    const { likes } = result.data
+    console.log(`[Migration] Fetched ${likes.length} likes`)
+
+    if (likes.length === 0) {
+      onProgress?.('No likes found to migrate.')
+      return { success: true, count: 0 }
+    }
+
+    onProgress?.(`Found ${likes.length} likes. Starting migration...`)
+
+    let bookmarked = 0
+    let failed = 0
+
+    for (let i = 0; i < likes.length; i++) {
+      const like = likes[i]
+      const progress = `Bookmarking ${i + 1}/${likes.length}...`
+      onProgress?.(progress)
+
+      try {
+        if (hasAPI) {
+          const res = await window.api.bookmarkTweet(like.id, cookie)
+          if (res.success) {
+            bookmarked++
+          } else {
+            failed++
+            console.warn(`[Migration] Failed to bookmark ${like.id}:`, res.error)
+          }
+        } else {
+          const res = await fetch('/api/bookmark-tweet', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ tweetId: like.id, cookie })
+          })
+          if (res.ok) {
+            bookmarked++
+          } else {
+            failed++
+          }
+        }
+      } catch (e) {
+        failed++
+        console.error(`[Migration] Error bookmarking ${like.id}:`, e.message)
+      }
+
+      // Rate limiting — 500ms between requests
+      if (i < likes.length - 1) {
+        await new Promise(r => setTimeout(r, 500))
+      }
+    }
+
+    onProgress?.(`Done! Bookmarked ${bookmarked}/${likes.length} likes${failed > 0 ? ` (${failed} failed)` : ''}`)
+
+    return {
+      success: true,
+      bookmarked,
+      failed,
+      total: likes.length,
+    }
+  } catch (error) {
+    console.error('[Migration] Error:', error)
+    throw error
+  }
+}
+
 // ─── Masonry layout ──────────────────────────────────────────────────────────
 export const CARD_W = 200   // must match BookmarkCard.CARD_W
 const GAP = 2               // tight 2px gap

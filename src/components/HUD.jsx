@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 import { useAppStore } from '../store/appState'
-import { syncBookmarks } from '../services/syncManager'
+import { syncBookmarks, migrateLikesToBookmarks } from '../services/syncManager'
 
 const btn = {
   background: 'rgba(20,20,20,0.75)',
@@ -36,6 +36,8 @@ const HudBtn = ({ onClick, title, disabled, spinning, children }) => (
 export default function HUD({ onSync, onArrange, onRemix, panelOpen }) {
   const [isSyncing, setIsSyncing] = useState(false)
   const [syncStatus, setSyncStatus] = useState('')
+  const [isMigrating, setIsMigrating] = useState(false)
+  const [migrateStatus, setMigrateStatus] = useState('')
 
   const canvasZoom            = useAppStore(s => s.canvasZoom)
   const setCanvasZoomCentered = useAppStore(s => s.setCanvasZoomCentered)
@@ -66,6 +68,22 @@ export default function HUD({ onSync, onArrange, onRemix, panelOpen }) {
       setSyncStatus(`Error`)
     } finally {
       setIsSyncing(false)
+    }
+  }
+
+  const handleMigrate = async () => {
+    setIsMigrating(true)
+    setMigrateStatus('Starting…')
+    try {
+      const result = await migrateLikesToBookmarks(setMigrateStatus)
+      setMigrateStatus(`Done: ${result.bookmarked} bookmarked`)
+      onSync?.()
+      setTimeout(() => setMigrateStatus(''), 3000)
+    } catch (e) {
+      setMigrateStatus(`Error`)
+      console.error('[HUD] Migration error:', e)
+    } finally {
+      setIsMigrating(false)
     }
   }
 
@@ -115,7 +133,7 @@ export default function HUD({ onSync, onArrange, onRemix, panelOpen }) {
           </button>
         </div>
 
-        {/* Top-right: sync + grid */}
+        {/* Top-right: sync + grid + migrate */}
         <div style={{
           position: 'absolute', top: 20, right: 20,
           display: 'flex', gap: 6, alignItems: 'center',
@@ -126,10 +144,20 @@ export default function HUD({ onSync, onArrange, onRemix, panelOpen }) {
               {syncStatus}
             </span>
           )}
+          {migrateStatus && (
+            <span style={{ fontSize: 10, color: '#666', fontFamily: 'monospace', background: 'rgba(20,20,20,0.75)', backdropFilter: 'blur(8px)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 6, padding: '3px 8px' }}>
+              {migrateStatus}
+            </span>
+          )}
           <HudBtn onClick={handleSync} title="Sync bookmarks" disabled={isSyncing} spinning={isSyncing}>
             <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
               <path d="M12 7A5 5 0 1 1 7 2" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
               <path d="M7 2l2.5 2.5L7 2 4.5 4.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+          </HudBtn>
+          <HudBtn onClick={handleMigrate} title="Migrate likes → bookmarks" disabled={isMigrating} spinning={isMigrating}>
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+              <path d="M7 2v10M2 7l5 5 5-5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
             </svg>
           </HudBtn>
           <HudBtn onClick={onArrange} title="Reset grid layout">
