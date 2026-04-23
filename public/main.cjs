@@ -769,7 +769,7 @@ async function captureAllLikesViaCDP(sess, username, cookieStr, ct0, bearerToken
     console.log(`[Electron] CDP capture: loading /${username}/likes...`);
 
     const win = new BrowserWindow({
-      width: 1280, height: 900, show: false,
+      width: 1280, height: 900, show: true,
       webPreferences: { nodeIntegration: false, contextIsolation: true, session: sess },
     });
 
@@ -799,6 +799,10 @@ async function captureAllLikesViaCDP(sess, username, cookieStr, ct0, bearerToken
     win.webContents.debugger.on("message", async (_event, method, params) => {
       if (method !== "Network.responseReceived") return;
       const url = params.response?.url || "";
+      // Log all graphql calls so we can see what operation name X.com uses
+      if (url.includes("/graphql/")) {
+        console.log(`[Electron] GraphQL call: ${url.split("/graphql/")[1]?.split("?")[0]}`);
+      }
       if (!url.includes("/LikedTweets") || !url.includes("/graphql/")) return;
 
       const qm = url.match(/graphql\/([^/?]+)\/LikedTweets/);
