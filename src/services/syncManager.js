@@ -169,26 +169,20 @@ export async function migrateLikesToBookmarks(onProgress, username) {
       return { success: true, count: 0 }
     }
 
-    onProgress?.(`Found ${likes.length} likes. Bookmarking via page...`)
+    onProgress?.(`Found ${likes.length} likes. Saving to canvas...`)
 
-    const tweetIds = likes.map(l => l.id)
-    let bookmarked = 0
-    let failed = 0
+    // Save likes directly as local bookmarks — no X.com API needed
+    const mediaLikes = likes.filter(l => l.thumbnail || l.videoUrl)
+    const positioned = computeMasonryPositions(mediaLikes)
+    await saveBookmarks(positioned)
 
-    if (hasAPI && window.api.bookmarkTweetsBatch) {
-      const res = await window.api.bookmarkTweetsBatch(tweetIds, username)
-      bookmarked = res.bookmarked || 0
-      failed = res.failed || 0
-    } else {
-      failed = tweetIds.length
-    }
-
-    onProgress?.(`Done! Bookmarked ${bookmarked}/${likes.length}${failed > 0 ? ` (${failed} failed)` : ''}`)
+    await setSyncMetadata('lastSync', new Date().toISOString())
+    onProgress?.(`Done! Added ${mediaLikes.length} likes to canvas`)
 
     return {
       success: true,
-      bookmarked,
-      failed,
+      bookmarked: mediaLikes.length,
+      failed: 0,
       total: likes.length,
     }
   } catch (error) {
