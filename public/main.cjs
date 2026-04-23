@@ -1215,6 +1215,21 @@ function parseGraphQLBookmarks(data, startIdx = 0) {
             const legacy = tweetData?.legacy;
             if (!legacy) continue;
 
+            // ── Debug: log structure for first 3 tweets so we can see actual API paths ──
+            if (bookmarks.length < 3) {
+              const _ur = tweetData?.core?.user_results?.result
+                       || tweetResult?.core?.user_results?.result;
+              console.log(`[Debug tweet#${bookmarks.length}]`,
+                'typename:', tweetResult?.__typename,
+                '| tweetData keys:', Object.keys(tweetData || {}).join(','),
+                '| has core:', !!tweetData?.core,
+                '| has core.user_results:', !!tweetData?.core?.user_results,
+                '| userResult typename:', _ur?.__typename,
+                '| userResult keys:', Object.keys(_ur || {}).join(','),
+                '| screen_name:', _ur?.legacy?.screen_name || _ur?.screen_name || '(none)',
+              );
+            }
+
             const userResult =
               tweetData?.core?.user_results?.result ||
               tweetResult?.core?.user_results?.result ||

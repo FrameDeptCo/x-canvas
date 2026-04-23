@@ -318,99 +318,78 @@ export default function HUD({ onSync, onArrange, onRemix, panelOpen }) {
         </div>
 
         {/* ── Bottom-center: color palette filter + custom picker ── */}
-        {paletteColors.length > 0 && (
+        {(paletteColors.length > 0 || activeFilters.color) && (
           <div style={{
-            position: 'absolute', bottom: 22, left: '50%', transform: 'translateX(-50%)',
-            display: 'flex', alignItems: 'center', gap: 6,
-            background: 'rgba(14,14,14,0.88)', backdropFilter: 'blur(14px)',
-            border: '1px solid rgba(255,255,255,0.06)',
-            borderRadius: 24, padding: '0 14px', height: 34,
+            position: 'absolute', bottom: 20, left: '50%', transform: 'translateX(-50%)',
+            display: 'flex', alignItems: 'center', gap: 7,
+            background: 'rgba(20,20,20,0.75)', backdropFilter: 'blur(8px)',
+            border: '1px solid rgba(255,255,255,0.08)',
+            borderRadius: 10, padding: '0 12px', height: 36,
             pointerEvents: 'auto',
-            boxShadow: '0 4px 20px rgba(0,0,0,0.45)',
           }}>
+            {/* Clear filter X — only visible when a color is active */}
+            <button
+              onClick={() => setColorFilter(null)}
+              title="Clear color filter"
+              style={{
+                background: 'none', border: 'none', cursor: 'pointer', padding: '0 2px',
+                display: 'flex', alignItems: 'center',
+                color: activeFilters.color ? '#888' : 'transparent',
+                pointerEvents: activeFilters.color ? 'auto' : 'none',
+                transition: 'color 120ms',
+              }}
+              onMouseEnter={e => { if (activeFilters.color) e.currentTarget.style.color = '#ccc' }}
+              onMouseLeave={e => { if (activeFilters.color) e.currentTarget.style.color = '#888' }}
+            >
+              <svg width="9" height="9" viewBox="0 0 9 9" fill="none">
+                <path d="M1 1l7 7M8 1L1 8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
+              </svg>
+            </button>
 
-            {/* Color swatches */}
             {paletteColors.map(color => {
               const isActive = activeFilters.color === color
               return (
                 <button
                   key={color}
-                  title={isActive ? 'Clear filter' : 'Filter by color'}
+                  title="Filter by this color"
                   onClick={() => setColorFilter(isActive ? null : color)}
                   style={{
-                    width: 13, height: 13, borderRadius: '50%', background: color,
-                    border: isActive ? '2px solid rgba(255,255,255,0.95)' : '1.5px solid rgba(0,0,0,0.35)',
-                    cursor: 'pointer', padding: 0, flexShrink: 0, outline: 'none',
-                    boxShadow: isActive ? `0 0 0 2.5px rgba(255,255,255,0.18), 0 0 8px ${color}99` : 'none',
-                    transform: isActive ? 'scale(1.35)' : 'scale(1)',
-                    transition: 'transform 140ms ease, box-shadow 140ms ease, border 140ms ease',
+                    width: 14, height: 14, borderRadius: '50%',
+                    background: color,
+                    border: isActive ? '2px solid #fff' : '1.5px solid rgba(255,255,255,0.18)',
+                    cursor: 'pointer', padding: 0, flexShrink: 0,
+                    transition: 'transform 100ms, border 100ms',
+                    transform: isActive ? 'scale(1.3)' : 'scale(1)',
                   }}
-                  onMouseEnter={e => { if (!isActive) e.currentTarget.style.transform = 'scale(1.2)' }}
-                  onMouseLeave={e => { e.currentTarget.style.transform = isActive ? 'scale(1.35)' : 'scale(1)' }}
+                  onMouseEnter={e => { if (!isActive) e.currentTarget.style.transform = 'scale(1.15)' }}
+                  onMouseLeave={e => { if (!isActive) e.currentTarget.style.transform = isActive ? 'scale(1.3)' : 'scale(1)' }}
                 />
               )
             })}
 
-            {/* Thin separator */}
-            <div style={{ width: 1, height: 14, background: 'rgba(255,255,255,0.09)', flexShrink: 0, margin: '0 2px' }} />
+            {/* Divider */}
+            <div style={{ width: 1, height: 14, background: 'rgba(255,255,255,0.1)', flexShrink: 0, margin: '0 1px' }} />
 
-            {/* Custom color picker button — palette icon, fills with chosen color when active */}
+            {/* Custom color picker — conic gradient = color wheel when idle,
+                filled with picked color when a custom color is active */}
             <button
-              title="Pick a custom color"
+              title="Pick a custom color to filter by"
               onClick={() => colorInputRef.current?.click()}
               style={{
-                width: 26, height: 22, borderRadius: 6,
-                background: isCustomColor ? activeFilters.color : 'rgba(255,255,255,0.05)',
-                border: isCustomColor ? '2px solid rgba(255,255,255,0.85)' : '1px solid rgba(255,255,255,0.09)',
-                cursor: 'pointer', padding: 0, flexShrink: 0, outline: 'none',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                color: isCustomColor ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.32)',
-                boxShadow: isCustomColor ? `0 0 0 2.5px rgba(255,255,255,0.14), 0 0 8px ${activeFilters.color}99` : 'none',
-                transform: isCustomColor ? 'scale(1.08)' : 'scale(1)',
-                transition: 'all 140ms ease',
+                width: 14, height: 14, borderRadius: '50%',
+                background: isCustomColor
+                  ? activeFilters.color
+                  : 'conic-gradient(#ff5e5e, #ffad36, #ffe566, #a3e635, #36d6e7, #7b68ee, #ee68b4, #ff5e5e)',
+                border: isCustomColor ? '2px solid #fff' : '1.5px solid rgba(255,255,255,0.18)',
+                cursor: 'pointer', padding: 0, flexShrink: 0,
+                transition: 'transform 100ms, border 100ms',
+                transform: isCustomColor ? 'scale(1.3)' : 'scale(1)',
               }}
-              onMouseEnter={e => {
-                if (!isCustomColor) {
-                  e.currentTarget.style.background = 'rgba(255,255,255,0.1)'
-                  e.currentTarget.style.color = 'rgba(255,255,255,0.65)'
-                }
-              }}
-              onMouseLeave={e => {
-                if (!isCustomColor) {
-                  e.currentTarget.style.background = 'rgba(255,255,255,0.05)'
-                  e.currentTarget.style.color = 'rgba(255,255,255,0.32)'
-                }
-              }}
-            >
-              {/* Palette icon */}
-              <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor">
-                <path d="M8 1a7 7 0 1 0 7 7 .5.5 0 0 0-.76-.43A2 2 0 0 1 11 8.5a2 2 0 0 1-2-2 .5.5 0 0 0-.5-.5A.5.5 0 0 0 8 6.5v.01A3.5 3.5 0 1 1 8 4.5v-.01A.5.5 0 0 0 7.5 4h.01A6 6 0 1 1 2 8a.5.5 0 0 0-1 0A7 7 0 1 0 8 1Z"/>
-                <circle cx="5" cy="5.5" r="1"/><circle cx="3.5" cy="8" r="1"/>
-                <circle cx="5" cy="10.5" r="1"/><circle cx="8" cy="12" r="1"/>
-              </svg>
-            </button>
+              onMouseEnter={e => { if (!isCustomColor) e.currentTarget.style.transform = 'scale(1.15)' }}
+              onMouseLeave={e => { e.currentTarget.style.transform = isCustomColor ? 'scale(1.3)' : 'scale(1)' }}
+            />
 
-            {/* Clear × — only visible when a filter is active */}
-            {activeFilters.color && (
-              <button
-                onClick={() => setColorFilter(null)}
-                title="Clear color filter"
-                style={{
-                  background: 'none', border: 'none', cursor: 'pointer', outline: 'none',
-                  padding: '0 1px', display: 'flex', alignItems: 'center',
-                  color: 'rgba(255,255,255,0.28)',
-                  transition: 'color 120ms',
-                }}
-                onMouseEnter={e => { e.currentTarget.style.color = 'rgba(255,255,255,0.7)' }}
-                onMouseLeave={e => { e.currentTarget.style.color = 'rgba(255,255,255,0.28)' }}
-              >
-                <svg width="9" height="9" viewBox="0 0 9 9" fill="none">
-                  <path d="M1 1l7 7M8 1L1 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-                </svg>
-              </button>
-            )}
-
-            {/* Hidden native color input */}
+            {/* Hidden native color picker input */}
             <input
               ref={colorInputRef}
               type="color"
