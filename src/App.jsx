@@ -184,6 +184,15 @@ function App() {
           onRemix={handleRemix}
           panelOpen={panelOpen}
         />
+        {/* Frameless window drag zone — Electron only, invisible strip at very top */}
+        {window.api && (
+          <div style={{
+            position: 'absolute', top: 0, left: 0, right: 0, height: 14,
+            WebkitAppRegion: 'drag',
+            pointerEvents: 'none',
+            zIndex: 25,
+          }} />
+        )}
       </div>
 
       {panelOpen && (
