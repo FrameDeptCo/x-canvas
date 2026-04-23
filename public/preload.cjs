@@ -9,4 +9,8 @@ contextBridge.exposeInMainWorld("api", {
   bookmarkTweet: (tweetId, cookie) => ipcRenderer.invoke("bookmark-tweet", tweetId, cookie),
   bookmarkTweetsBatch: (tweetIds, username) => ipcRenderer.invoke("bookmark-tweets-batch", tweetIds, username),
   logout: () => ipcRenderer.invoke("logout"),
+  // Window controls (frameless window)
+  minimizeWindow: () => ipcRenderer.invoke("minimize-window"),
+  maximizeWindow: () => ipcRenderer.invoke("maximize-window"),
+  closeWindow:    () => ipcRenderer.invoke("close-window"),
 });

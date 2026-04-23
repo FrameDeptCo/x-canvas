@@ -39,6 +39,7 @@ function createWindow() {
     height: 800,
     minWidth: 800,
     minHeight: 600,
+    frame: false,          // frameless — custom title bar in renderer
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
       nodeIntegration: false,
@@ -211,6 +212,14 @@ ipcMain.handle("logout", async () => {
   capturedBearerToken = null;
   return { success: true };
 });
+
+// ─── Window controls (frameless window) ──────────────────────────────────────
+ipcMain.handle("minimize-window", () => { mainWindow?.minimize(); });
+ipcMain.handle("maximize-window", () => {
+  if (mainWindow?.isMaximized()) mainWindow.unmaximize();
+  else mainWindow?.maximize();
+});
+ipcMain.handle("close-window", () => { mainWindow?.close(); });
 
 // ─── PRIMARY method: load the real X.com bookmarks page, use CDP to capture
 // every GraphQL /Bookmarks response body, and scroll to trigger all pages.
@@ -1208,15 +1217,25 @@ function parseGraphQLBookmarks(data, startIdx = 0) {
 
             const userResult =
               tweetData?.core?.user_results?.result ||
-              tweetResult?.core?.user_results?.result;
+              tweetResult?.core?.user_results?.result ||
+              tweetData?.tweet?.core?.user_results?.result;
 
-            const userLegacy =
-              userResult?.__typename === "User"
-                ? userResult.legacy
-                : userResult?.legacy || userResult;
+            // Safely unwrap – skip UserUnavailable (suspended/blocked accounts)
+            const userLegacy = userResult?.__typename === "User"
+              ? userResult.legacy
+              : userResult?.__typename === "UserUnavailable"
+              ? null
+              : userResult?.legacy;
 
-            const screenName = userLegacy?.screen_name || userResult?.screen_name || "";
+            let screenName = userLegacy?.screen_name || "";
+
+            // Fallback for retweets: extract @handle from "RT @handle: …" prefix
+            if (!screenName && legacy.full_text?.startsWith("RT @")) {
+              const rtM = legacy.full_text.match(/^RT @([A-Za-z0-9_]+):/);
+              if (rtM) screenName = rtM[1];
+            }
             const displayName = userLegacy?.name || userResult?.name || screenName || "Unknown";
+            const authorImage = userLegacy?.profile_image_url_https || userResult?.profile_image_url_https || null;
 
             const mediaEntities = legacy.extended_entities?.media || legacy.entities?.media || [];
             const firstMedia = mediaEntities[0] || null;
@@ -1236,7 +1255,7 @@ function parseGraphQLBookmarks(data, startIdx = 0) {
               text: legacy.full_text || legacy.text || "",
               author: screenName || "unknown",
               authorName: displayName,
-              authorImage: userLegacy?.profile_image_url_https || null,
+              authorImage,
               thumbnail,
               videoUrl,
               createdAt: legacy.created_at || new Date().toISOString(),

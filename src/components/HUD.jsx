@@ -33,16 +33,59 @@ const HudBtn = ({ onClick, title, disabled, spinning, children }) => (
   </button>
 )
 
-export default function HUD({ onSync, onArrange, onRemix, panelOpen }) {
-  const [isSyncing, setIsSyncing] = useState(false)
-  const [syncStatus, setSyncStatus] = useState('')
-  const [isMigrating, setIsMigrating] = useState(false)
-  const [migrateStatus, setMigrateStatus] = useState('')
-  const [showUsernamePrompt, setShowUsernamePrompt] = useState(false)
-  const [usernameInput, setUsernameInput] = useState('')
+// ── Window traffic-light button ───────────────────────────────────────────────
+const TrafficBtn = ({ color, hoverColor, onClick, title, icon }) => {
+  const [hov, setHov] = useState(false)
+  return (
+    <button
+      onClick={onClick}
+      title={title}
+      style={{
+        width: 12, height: 12, borderRadius: '50%',
+        background: hov ? hoverColor : color,
+        border: 'none', cursor: 'pointer', padding: 0,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        flexShrink: 0, transition: 'background 100ms',
+        WebkitAppRegion: 'no-drag',
+      }}
+      onMouseEnter={() => setHov(true)}
+      onMouseLeave={() => setHov(false)}
+    >
+      {hov && icon}
+    </button>
+  )
+}
 
-  const canvasZoom            = useAppStore(s => s.canvasZoom)
-  const setCanvasZoomCentered = useAppStore(s => s.setCanvasZoomCentered)
+export default function HUD({ onSync, onArrange, onRemix, panelOpen }) {
+  const [isSyncing,          setIsSyncing]          = useState(false)
+  const [syncStatus,         setSyncStatus]         = useState('')
+  const [isMigrating,        setIsMigrating]        = useState(false)
+  const [migrateStatus,      setMigrateStatus]      = useState('')
+  const [showUsernamePrompt, setShowUsernamePrompt] = useState(false)
+  const [usernameInput,      setUsernameInput]      = useState('')
+
+  const canvasZoom             = useAppStore(s => s.canvasZoom)
+  const setCanvasZoomCentered  = useAppStore(s => s.setCanvasZoomCentered)
+
+  // Folder filter
+  const folders            = useAppStore(s => s.folders)
+  const selectedFolder     = useAppStore(s => s.selectedFolder)
+  const setSelectedFolder  = useAppStore(s => s.setSelectedFolder)
+
+  // Color filter
+  const bookmarkColors = useAppStore(s => s.bookmarkColors)
+  const activeFilters  = useAppStore(s => s.activeFilters)
+  const setColorFilter = useAppStore(s => s.setColorFilter)
+
+  // Top-8 most-frequent dominant colors across all cards
+  const colorCounts = {}
+  for (const c of Object.values(bookmarkColors)) {
+    colorCounts[c] = (colorCounts[c] || 0) + 1
+  }
+  const paletteColors = Object.entries(colorCounts)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 8)
+    .map(([c]) => c)
 
   const HEADER_H = 0
   const vw = () => window.innerWidth - (panelOpen ? 280 : 0)
@@ -50,13 +93,10 @@ export default function HUD({ onSync, onArrange, onRemix, panelOpen }) {
 
   const sliderVal = Math.round(((canvasZoom - 0.25) / 1.75) * 100)
 
-  const zoomTo = (z) => setCanvasZoomCentered(Math.max(0.15, Math.min(5, Math.round(z * 100) / 100)), vw(), vh())
-  const zoomIn  = () => zoomTo(canvasZoom + 0.15)
-  const zoomOut = () => zoomTo(canvasZoom - 0.15)
-  const onSlider = (e) => {
-    const pct = Number(e.target.value) / 100
-    zoomTo(0.25 + pct * 1.75)
-  }
+  const zoomTo   = (z) => setCanvasZoomCentered(Math.max(0.15, Math.min(5, Math.round(z * 100) / 100)), vw(), vh())
+  const zoomIn   = () => zoomTo(canvasZoom + 0.15)
+  const zoomOut  = () => zoomTo(canvasZoom - 0.15)
+  const onSlider = (e) => { zoomTo(0.25 + (Number(e.target.value) / 100) * 1.75) }
 
   const handleSync = async () => {
     setIsSyncing(true)
@@ -66,8 +106,8 @@ export default function HUD({ onSync, onArrange, onRemix, panelOpen }) {
       setSyncStatus('Done')
       onSync?.()
       setTimeout(() => setSyncStatus(''), 2500)
-    } catch (e) {
-      setSyncStatus(`Error`)
+    } catch {
+      setSyncStatus('Error')
     } finally {
       setIsSyncing(false)
     }
@@ -75,11 +115,8 @@ export default function HUD({ onSync, onArrange, onRemix, panelOpen }) {
 
   const handleMigrate = () => {
     const saved = localStorage.getItem('x_username')
-    if (saved) {
-      runMigration(saved)
-    } else {
-      setShowUsernamePrompt(true)
-    }
+    if (saved) runMigration(saved)
+    else setShowUsernamePrompt(true)
   }
 
   const runMigration = async (username) => {
@@ -101,6 +138,8 @@ export default function HUD({ onSync, onArrange, onRemix, panelOpen }) {
     }
   }
 
+  const isElectron = typeof window !== 'undefined' && !!window.api
+
   return (
     <>
       <style>{`
@@ -117,12 +156,94 @@ export default function HUD({ onSync, onArrange, onRemix, panelOpen }) {
           border: none; box-shadow: 0 1px 3px rgba(0,0,0,0.5);
         }
         .hud-slider::-webkit-slider-thumb:hover { background: #fff; }
+        .hud-folder-select {
+          -webkit-appearance: none; appearance: none;
+          background: rgba(20,20,20,0.75);
+          border: 1px solid rgba(255,255,255,0.08);
+          color: #888; font-size: 11px; font-family: monospace;
+          border-radius: 7px; padding: 0 26px 0 10px; height: 32px;
+          cursor: pointer; outline: none; max-width: 150px;
+          background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%23666' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+          background-repeat: no-repeat;
+          background-position: right 8px center;
+        }
+        .hud-folder-select:hover { color: #ddd; }
+        .hud-folder-select option { background: #111; color: #ccc; }
       `}</style>
 
       {/* Overlay — pointer-events off by default, on for children */}
       <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 20 }}>
 
-        {/* Top-center: zoom */}
+        {/* ── Top-left: window controls + folder filter ── */}
+        {(isElectron || folders.length > 1) && (
+          <div style={{
+            position: 'absolute', top: 20, left: 20,
+            display: 'flex', flexDirection: 'column', gap: 7,
+            pointerEvents: 'auto',
+            WebkitAppRegion: 'no-drag',
+          }}>
+            {/* Traffic lights (close / minimize / maximize) — Electron only */}
+            {isElectron && (
+              <div style={{
+                display: 'flex', gap: 6, alignItems: 'center',
+                background: 'rgba(20,20,20,0.75)', backdropFilter: 'blur(8px)',
+                border: '1px solid rgba(255,255,255,0.08)',
+                borderRadius: 8, padding: '0 10px', height: 32,
+              }}>
+                <TrafficBtn
+                  color="#ff5f57" hoverColor="#ff3b30"
+                  onClick={() => window.api?.closeWindow()}
+                  title="Close"
+                  icon={
+                    <svg width="6" height="6" viewBox="0 0 6 6" fill="none">
+                      <path d="M1 1l4 4M5 1L1 5" stroke="rgba(0,0,0,0.45)" strokeWidth="1.2" strokeLinecap="round"/>
+                    </svg>
+                  }
+                />
+                <TrafficBtn
+                  color="#febc2e" hoverColor="#f0a500"
+                  onClick={() => window.api?.minimizeWindow()}
+                  title="Minimize"
+                  icon={
+                    <svg width="6" height="2" viewBox="0 0 6 2" fill="none">
+                      <path d="M0 1h6" stroke="rgba(0,0,0,0.45)" strokeWidth="1.2" strokeLinecap="round"/>
+                    </svg>
+                  }
+                />
+                <TrafficBtn
+                  color="#28c840" hoverColor="#1aab30"
+                  onClick={() => window.api?.maximizeWindow()}
+                  title="Maximize"
+                  icon={
+                    <svg width="6" height="6" viewBox="0 0 6 6" fill="none">
+                      <rect x="0.6" y="0.6" width="4.8" height="4.8" rx="1" stroke="rgba(0,0,0,0.45)" strokeWidth="1"/>
+                    </svg>
+                  }
+                />
+              </div>
+            )}
+
+            {/* Folder filter — only when more than just "default" exists */}
+            {folders.length > 1 && (
+              <select
+                className="hud-folder-select"
+                value={selectedFolder}
+                onChange={e => setSelectedFolder(e.target.value)}
+                title="Filter by folder"
+              >
+                <option value="all">All Bookmarks</option>
+                {folders
+                  .filter(f => f.id !== 'default')
+                  .map(f => (
+                    <option key={f.id} value={f.id}>{f.name}</option>
+                  ))
+                }
+              </select>
+            )}
+          </div>
+        )}
+
+        {/* ── Top-center: zoom ── */}
         <div style={{
           position: 'absolute', top: 20, left: '50%', transform: 'translateX(-50%)',
           display: 'flex', alignItems: 'center', gap: 8,
@@ -131,13 +252,15 @@ export default function HUD({ onSync, onArrange, onRemix, panelOpen }) {
           borderRadius: 10, padding: '0 12px', height: 36,
           pointerEvents: 'auto',
         }}>
-          <button onClick={zoomOut} title="Zoom out" style={{ background: 'none', border: 'none', color: '#666', cursor: 'pointer', padding: '0 2px', display: 'flex', alignItems: 'center' }}
+          <button onClick={zoomOut} title="Zoom out"
+            style={{ background: 'none', border: 'none', color: '#666', cursor: 'pointer', padding: '0 2px', display: 'flex', alignItems: 'center' }}
             onMouseEnter={e => e.currentTarget.style.color = '#ccc'}
             onMouseLeave={e => e.currentTarget.style.color = '#666'}>
             <svg width="12" height="2" viewBox="0 0 12 2"><rect width="12" height="2" rx="1" fill="currentColor"/></svg>
           </button>
           <input type="range" min="0" max="100" value={sliderVal} onChange={onSlider} className="hud-slider" />
-          <button onClick={zoomIn} title="Zoom in" style={{ background: 'none', border: 'none', color: '#666', cursor: 'pointer', padding: '0 2px', display: 'flex', alignItems: 'center' }}
+          <button onClick={zoomIn} title="Zoom in"
+            style={{ background: 'none', border: 'none', color: '#666', cursor: 'pointer', padding: '0 2px', display: 'flex', alignItems: 'center' }}
             onMouseEnter={e => e.currentTarget.style.color = '#ccc'}
             onMouseLeave={e => e.currentTarget.style.color = '#666'}>
             <svg width="12" height="12" viewBox="0 0 12 12">
@@ -147,7 +270,7 @@ export default function HUD({ onSync, onArrange, onRemix, panelOpen }) {
           </button>
         </div>
 
-        {/* Top-right: sync + grid + migrate */}
+        {/* ── Top-right: sync + likes + grid + remix ── */}
         <div style={{
           position: 'absolute', top: 20, right: 20,
           display: 'flex', gap: 6, alignItems: 'center',
@@ -189,9 +312,61 @@ export default function HUD({ onSync, onArrange, onRemix, panelOpen }) {
           </HudBtn>
         </div>
 
+        {/* ── Bottom-center: color palette filter ── */}
+        {paletteColors.length > 0 && (
+          <div style={{
+            position: 'absolute', bottom: 20, left: '50%', transform: 'translateX(-50%)',
+            display: 'flex', alignItems: 'center', gap: 7,
+            background: 'rgba(20,20,20,0.75)', backdropFilter: 'blur(8px)',
+            border: '1px solid rgba(255,255,255,0.08)',
+            borderRadius: 10, padding: '0 12px', height: 36,
+            pointerEvents: 'auto',
+          }}>
+            {/* Clear filter X — only visible when a color is active */}
+            <button
+              onClick={() => setColorFilter(null)}
+              title="Clear color filter"
+              style={{
+                background: 'none', border: 'none', cursor: 'pointer', padding: '0 2px',
+                display: 'flex', alignItems: 'center',
+                color: activeFilters.color ? '#888' : 'transparent',
+                pointerEvents: activeFilters.color ? 'auto' : 'none',
+                transition: 'color 120ms',
+              }}
+              onMouseEnter={e => { if (activeFilters.color) e.currentTarget.style.color = '#ccc' }}
+              onMouseLeave={e => { if (activeFilters.color) e.currentTarget.style.color = '#888' }}
+            >
+              <svg width="9" height="9" viewBox="0 0 9 9" fill="none">
+                <path d="M1 1l7 7M8 1L1 8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
+              </svg>
+            </button>
+
+            {paletteColors.map(color => {
+              const isActive = activeFilters.color === color
+              return (
+                <button
+                  key={color}
+                  title={`Filter by color`}
+                  onClick={() => setColorFilter(isActive ? null : color)}
+                  style={{
+                    width: 14, height: 14, borderRadius: '50%',
+                    background: color,
+                    border: isActive ? '2px solid #fff' : '1.5px solid rgba(255,255,255,0.18)',
+                    cursor: 'pointer', padding: 0, flexShrink: 0,
+                    transition: 'transform 100ms, border 100ms',
+                    transform: isActive ? 'scale(1.3)' : 'scale(1)',
+                  }}
+                  onMouseEnter={e => { if (!isActive) e.currentTarget.style.transform = 'scale(1.15)' }}
+                  onMouseLeave={e => { if (!isActive) e.currentTarget.style.transform = isActive ? 'scale(1.3)' : 'scale(1)' }}
+                />
+              )
+            })}
+          </div>
+        )}
+
       </div>
 
-      {/* Username prompt modal */}
+      {/* ── Username prompt modal ── */}
       {showUsernamePrompt && (
         <div style={{
           position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
