@@ -1220,18 +1220,6 @@ function parseGraphQLBookmarks(data, startIdx = 0) {
               tweetResult?.core?.user_results?.result ||
               tweetData?.tweet?.core?.user_results?.result;
 
-            // ── Debug: show what's inside userResult.legacy and userResult.core ──
-            if (bookmarks.length < 2) {
-              const _ur = userResult;
-              console.log(`[Debug tweet#${bookmarks.length}]`,
-                '| userResult.legacy keys:', Object.keys(_ur?.legacy || {}).join(','),
-                '| userResult.core keys:', Object.keys(_ur?.core || {}).join(','),
-                '| legacy.screen_name:', _ur?.legacy?.screen_name || '(none)',
-                '| core.screen_name:', _ur?.core?.screen_name || '(none)',
-                '| core.user_name:', _ur?.core?.user_name || '(none)',
-                '| core.name:', _ur?.core?.name || '(none)',
-              );
-            }
 
             // Safely unwrap – skip UserUnavailable (suspended/blocked accounts)
             // Fall through to `userResult` itself as legacy if __typename is absent/unknown
@@ -1259,8 +1247,10 @@ function parseGraphQLBookmarks(data, startIdx = 0) {
               userResult?.name ||
               screenName || "Unknown";
             const authorImage =
-              userLegacy?.profile_image_url_https ||
-              userResult?.core?.profile_image_url_https ||  // new path
+              userLegacy?.profile_image_url_https ||        // old path
+              userResult?.avatar?.image_url ||              // new path: avatar.image_url
+              userResult?.avatar?.profile_image_url_https || // alt new path
+              userResult?.core?.profile_image_url_https ||  // fallback
               userResult?.profile_image_url_https ||
               null;
 
