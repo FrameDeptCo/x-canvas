@@ -1,6 +1,6 @@
 # x-canvas
 
-An Electron desktop app that syncs your X.com bookmarks **and likes** and displays them beautifully on an infinite, draggable canvas.
+An Electron desktop app that syncs your X.com bookmarks **& likes** and displays them beautifully on an infinite, draggable canvas.
 
 ## Features
 
