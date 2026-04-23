@@ -34,7 +34,8 @@
       "WebFetch(domain:raw.githubusercontent.com)",
       "Bash(git add *)",
       "Bash(git commit *)",
-      "mcp__Claude_Preview__preview_start"
+      "mcp__Claude_Preview__preview_start",
+      "Bash(npx eslint *)"
     ]
   }
 }

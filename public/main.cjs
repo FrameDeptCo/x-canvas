@@ -384,7 +384,7 @@ async function discoverQueryId(sess, cookieStr, bearerToken) {
   return null;
 }
 
-ipcMain.handle("fetch-likes", async (_, cookie) => {
+ipcMain.handle("fetch-likes", async (_, cookie, username) => {
   console.log("[Electron] Fetching likes — using GraphQL pagination");
 
   try {
@@ -429,10 +429,10 @@ ipcMain.handle("fetch-likes", async (_, cookie) => {
       }
     }
 
-    // Fallback: CDP — load the user's likes page and intercept responses
-    if (likes.length === 0) {
-      console.log("[Electron] Falling back to CDP capture for likes...");
-      likes = await captureAllLikesViaCDP(sess, userId, cookieStr, ct0, bearerToken);
+    // Fallback: CDP — load /{username}/likes and intercept responses
+    if (likes.length === 0 && username) {
+      console.log(`[Electron] Falling back to CDP capture for /${username}/likes...`);
+      likes = await captureAllLikesViaCDP(sess, username, cookieStr, ct0, bearerToken);
     }
 
     const seen = new Set();
@@ -764,9 +764,9 @@ async function discoverLikesQueryId(sess, cookieStr) {
   return null;
 }
 
-async function captureAllLikesViaCDP(sess, userId, cookieStr, ct0, bearerToken) {
+async function captureAllLikesViaCDP(sess, username, cookieStr, ct0, bearerToken) {
   return new Promise((resolve) => {
-    console.log(`[Electron] CDP capture: loading likes page for userId=${userId}...`);
+    console.log(`[Electron] CDP capture: loading /${username}/likes...`);
 
     const win = new BrowserWindow({
       width: 1280, height: 900, show: false,
@@ -836,31 +836,7 @@ async function captureAllLikesViaCDP(sess, userId, cookieStr, ct0, bearerToken) 
     });
 
     win.on("closed", () => finish("window-closed"));
-    // Resolve username from userId then load /{username}/likes
-    (async () => {
-      try {
-        const verifyRes = await sess.fetch("https://x.com/i/api/1.1/account/verify_credentials.json", {
-          headers: {
-            authorization: bearerToken,
-            "x-csrf-token": ct0,
-            cookie: cookieStr,
-            "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-          },
-        });
-        if (verifyRes.ok) {
-          const profile = await verifyRes.json();
-          const screenName = profile.screen_name;
-          console.log(`[Electron] CDP likes: loading /${screenName}/likes`);
-          win.webContents.loadURL(`https://x.com/${screenName}/likes`);
-        } else {
-          win.webContents.loadURL(`https://x.com/i/bookmarks`); // fallback — at least captures bearer
-          finish("no-username");
-        }
-      } catch (e) {
-        console.error("[Electron] CDP likes: could not resolve username:", e.message);
-        finish("error");
-      }
-    })();
+    win.webContents.loadURL(`https://x.com/${username}/likes`);
   });
 }
 

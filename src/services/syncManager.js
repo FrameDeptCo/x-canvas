@@ -126,7 +126,7 @@ export async function addCustomFolder(name, color) {
   return folder
 }
 
-export async function migrateLikesToBookmarks(onProgress) {
+export async function migrateLikesToBookmarks(onProgress, username) {
   try {
     onProgress?.('Fetching session cookie...')
 
@@ -147,12 +147,12 @@ export async function migrateLikesToBookmarks(onProgress) {
     let result
 
     if (hasAPI) {
-      result = await window.api.fetchLikes(cookie)
+      result = await window.api.fetchLikes(cookie, username)
     } else {
       const response = await fetch('/api/fetch-likes', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ cookie })
+        body: JSON.stringify({ cookie, username })
       })
       result = await response.json()
     }

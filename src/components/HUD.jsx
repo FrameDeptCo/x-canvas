@@ -38,6 +38,8 @@ export default function HUD({ onSync, onArrange, onRemix, panelOpen }) {
   const [syncStatus, setSyncStatus] = useState('')
   const [isMigrating, setIsMigrating] = useState(false)
   const [migrateStatus, setMigrateStatus] = useState('')
+  const [showUsernamePrompt, setShowUsernamePrompt] = useState(false)
+  const [usernameInput, setUsernameInput] = useState('')
 
   const canvasZoom            = useAppStore(s => s.canvasZoom)
   const setCanvasZoomCentered = useAppStore(s => s.setCanvasZoomCentered)
@@ -71,16 +73,28 @@ export default function HUD({ onSync, onArrange, onRemix, panelOpen }) {
     }
   }
 
-  const handleMigrate = async () => {
+  const handleMigrate = () => {
+    const saved = localStorage.getItem('x_username')
+    if (saved) {
+      runMigration(saved)
+    } else {
+      setShowUsernamePrompt(true)
+    }
+  }
+
+  const runMigration = async (username) => {
+    const clean = username.replace(/^@/, '').trim()
+    localStorage.setItem('x_username', clean)
+    setShowUsernamePrompt(false)
     setIsMigrating(true)
     setMigrateStatus('Starting…')
     try {
-      const result = await migrateLikesToBookmarks(setMigrateStatus)
+      const result = await migrateLikesToBookmarks(setMigrateStatus, clean)
       setMigrateStatus(`Done: ${result.bookmarked} bookmarked`)
       onSync?.()
       setTimeout(() => setMigrateStatus(''), 3000)
     } catch (e) {
-      setMigrateStatus(`Error`)
+      setMigrateStatus('Error')
       console.error('[HUD] Migration error:', e)
     } finally {
       setIsMigrating(false)
@@ -177,6 +191,36 @@ export default function HUD({ onSync, onArrange, onRemix, panelOpen }) {
         </div>
 
       </div>
+
+      {/* Username prompt modal */}
+      {showUsernamePrompt && (
+        <div style={{
+          position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+          background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)', zIndex: 50, pointerEvents: 'auto',
+        }}>
+          <div style={{
+            background: '#111', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 12,
+            padding: '24px 28px', display: 'flex', flexDirection: 'column', gap: 14, minWidth: 280,
+          }}>
+            <div style={{ color: '#ccc', fontSize: 13, fontFamily: 'monospace' }}>Your X username</div>
+            <input
+              autoFocus
+              value={usernameInput}
+              onChange={e => setUsernameInput(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') runMigration(usernameInput); if (e.key === 'Escape') setShowUsernamePrompt(false) }}
+              placeholder="@handle"
+              style={{
+                background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.15)',
+                borderRadius: 7, padding: '8px 12px', color: '#eee', fontSize: 13, fontFamily: 'monospace', outline: 'none',
+              }}
+            />
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <button onClick={() => setShowUsernamePrompt(false)} style={{ background: 'none', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 7, color: '#666', padding: '6px 14px', cursor: 'pointer', fontSize: 12 }}>Cancel</button>
+              <button onClick={() => runMigration(usernameInput)} style={{ background: '#1d9bf0', border: 'none', borderRadius: 7, color: '#fff', padding: '6px 14px', cursor: 'pointer', fontSize: 12 }}>Start</button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   )
 }
