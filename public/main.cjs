@@ -401,17 +401,31 @@ ipcMain.handle("fetch-likes", async (_, cookie) => {
     const bearerToken = capturedBearerToken ||
       "Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA";
 
-    const discoveredId = await discoverQueryId(sess, cookieStr, bearerToken);
-    const queryIds = [capturedLikesQueryId, discoveredId,
-      "Fy0QMy4q_aZCpkO0PnyLYw", "HuTx74BxAnezK1D2HLp9-A", "Uv_m_cBXJL1lVXcgX0-u8Q",
+    // Extract userId from twid cookie (format: u%3D{userId} or u={userId})
+    const twidCookie = sessionCookies.find(c => c.name === "twid");
+    const twidValue = twidCookie?.value || "";
+    const userIdMatch = twidValue.match(/u(?:%3D|=)(\d+)/);
+    const userId = userIdMatch ? userIdMatch[1] : null;
+    console.log(`[Electron] Extracted userId: ${userId}`);
+
+    if (!userId) {
+      throw new Error("Could not extract userId from session. Please make sure you are logged in.");
+    }
+
+    // Known Likes query IDs (different from Bookmarks)
+    const queryIds = [capturedLikesQueryId,
+      "NmoKmMgTXFkDMnVJdGE4vA",
+      "WTGMMiIqfKCT-GRaJCYYiA",
+      "YSGCXbKANtEerBWr-A0GAg",
+      "kgZtsNx-shopTEAuFAIOOQ",
     ].filter(Boolean);
 
     let likes = [];
     for (const queryId of queryIds) {
       try {
-        likes = await fetchLikesGraphQL(sess, queryId, cookieStr, ct0, bearerToken);
+        likes = await fetchLikesGraphQL(sess, queryId, userId, cookieStr, ct0, bearerToken);
         if (likes.length > 0) {
-          console.log(`[Electron] GraphQL pagination got ${likes.length} likes`);
+          console.log(`[Electron] GraphQL pagination got ${likes.length} likes with queryId=${queryId}`);
           break;
         }
       } catch (e) {
@@ -637,8 +651,7 @@ const GRAPHQL_FEATURES = {
   articles_preview_enabled: true,
 };
 
-async function fetchLikesGraphQL(sess, queryId, cookieStr, ct0, bearerToken) {
-  const url = `https://x.com/i/api/graphql/${queryId}/Likes`;
+async function fetchLikesGraphQL(sess, queryId, userId, cookieStr, ct0, bearerToken) {
   const headers = {
     authorization: bearerToken,
     "x-csrf-token": ct0,
@@ -646,8 +659,7 @@ async function fetchLikesGraphQL(sess, queryId, cookieStr, ct0, bearerToken) {
     "x-twitter-auth-type": "OAuth2Session",
     "x-twitter-client-language": "en",
     cookie: cookieStr,
-    "content-type": "application/json",
-    referer: "https://x.com/i/likes",
+    referer: `https://x.com/i/likes`,
     origin: "https://x.com",
     accept: "*/*",
     "accept-language": "en-US,en;q=0.9",
@@ -661,27 +673,27 @@ async function fetchLikesGraphQL(sess, queryId, cookieStr, ct0, bearerToken) {
 
   while (page < MAX_PAGES) {
     page++;
-    const body = {
-      variables: {
-        count: 100,
-        cursor: cursor,
-        includePromotedContent: false,
-        withBirdwatchNotes: false,
-        withClientEventToken: false,
-        withVoice: true,
-        withV2Timeline: true,
-      },
-      features: GRAPHQL_FEATURES,
+    const variables = {
+      userId,
+      count: 100,
+      cursor: cursor || undefined,
+      includePromotedContent: false,
+      withBirdwatchNotes: false,
+      withClientEventToken: false,
+      withVoice: true,
+      withV2Timeline: true,
     };
+    if (!cursor) delete variables.cursor;
 
-    console.log(`[Electron] Fetching likes page ${page}, cursor=${cursor ? cursor.substring(0, 30) + "…" : "null"}`);
-
-    const response = await sess.fetch(url, {
-      method: "POST",
-      headers,
-      body: JSON.stringify(body),
+    const params = new URLSearchParams({
+      variables: JSON.stringify(variables),
+      features: JSON.stringify(GRAPHQL_FEATURES),
     });
 
+    const url = `https://x.com/i/api/graphql/${queryId}/Likes?${params}`;
+    console.log(`[Electron] Fetching likes page ${page} for userId=${userId}, cursor=${cursor ? cursor.substring(0, 20) + "…" : "null"}`);
+
+    const response = await sess.fetch(url, { method: "GET", headers });
     console.log(`[Electron] Page ${page} status: ${response.status}`);
 
     if (!response.ok) {
@@ -693,7 +705,7 @@ async function fetchLikesGraphQL(sess, queryId, cookieStr, ct0, bearerToken) {
     const text = await response.text();
     const data = JSON.parse(text);
 
-    const { bookmarks: pageLikes, nextCursor } = parseGraphQLBookmarks(data, allLikes.length);
+    const { bookmarks: pageLikes, nextCursor } = parseGraphQLLikes(data, allLikes.length);
     console.log(`[Electron] Page ${page}: got ${pageLikes.length} likes, nextCursor=${nextCursor ? "yes" : "no"}`);
 
     allLikes.push(...pageLikes);
@@ -708,6 +720,22 @@ async function fetchLikesGraphQL(sess, queryId, cookieStr, ct0, bearerToken) {
   }
 
   return allLikes;
+}
+
+function parseGraphQLLikes(data, startIdx = 0) {
+  // Likes response uses user.result.timeline_v2 structure
+  const timeline =
+    data?.data?.user?.result?.timeline_v2?.timeline ||
+    data?.data?.user?.result?.timeline?.timeline ||
+    data?.data?.likes_timeline?.timeline;
+
+  if (!timeline) {
+    console.log("[Electron] Likes: no timeline found. Keys:", JSON.stringify(Object.keys(data?.data || {})));
+    return { bookmarks: [], nextCursor: null };
+  }
+
+  // Reuse bookmark parser — same tweet entry structure
+  return parseGraphQLBookmarks({ data: { bookmark_timeline_v2: { timeline } } }, startIdx);
 }
 
 async function fetchBookmarksGraphQL(sess, queryId, cookieStr, ct0, bearerToken) {
