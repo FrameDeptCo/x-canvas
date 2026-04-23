@@ -97,11 +97,11 @@ app.on("ready", async () => {
         capturedQueryId = bookmarksMatch[1];
         console.log(`[Electron] Captured Bookmarks query ID: ${capturedQueryId}`);
       }
-      // Capture Likes query ID
-      const likesMatch = details.url.match(/graphql\/([^/]+)\/Likes/);
+      // Capture LikedTweets query ID (X.com uses LikedTweets, not Likes)
+      const likesMatch = details.url.match(/graphql\/([^/]+)\/LikedTweets/);
       if (likesMatch && likesMatch[1]) {
         capturedLikesQueryId = likesMatch[1];
-        console.log(`[Electron] Captured Likes query ID: ${capturedLikesQueryId}`);
+        console.log(`[Electron] Captured LikedTweets query ID: ${capturedLikesQueryId}`);
       }
       // Capture BookmarkFolders query ID
       const foldersMatch = details.url.match(/graphql\/([^/]+)\/BookmarkFolders/);
@@ -412,25 +412,27 @@ ipcMain.handle("fetch-likes", async (_, cookie) => {
       throw new Error("Could not extract userId from session. Please make sure you are logged in.");
     }
 
-    // Known Likes query IDs (different from Bookmarks)
-    const queryIds = [capturedLikesQueryId,
-      "NmoKmMgTXFkDMnVJdGE4vA",
-      "WTGMMiIqfKCT-GRaJCYYiA",
-      "YSGCXbKANtEerBWr-A0GAg",
-      "kgZtsNx-shopTEAuFAIOOQ",
-    ].filter(Boolean);
+    // Discover current LikedTweets query ID from X.com JS bundles
+    const discoveredLikesId = await discoverLikesQueryId(sess, cookieStr);
+    const queryIds = [capturedLikesQueryId, discoveredLikesId].filter(Boolean);
 
     let likes = [];
     for (const queryId of queryIds) {
       try {
         likes = await fetchLikesGraphQL(sess, queryId, userId, cookieStr, ct0, bearerToken);
         if (likes.length > 0) {
-          console.log(`[Electron] GraphQL pagination got ${likes.length} likes with queryId=${queryId}`);
+          console.log(`[Electron] Got ${likes.length} likes with queryId=${queryId}`);
           break;
         }
       } catch (e) {
-        console.log(`[Electron] GraphQL queryId=${queryId} failed:`, e.message);
+        console.log(`[Electron] queryId=${queryId} failed:`, e.message);
       }
+    }
+
+    // Fallback: CDP — load the user's likes page and intercept responses
+    if (likes.length === 0) {
+      console.log("[Electron] Falling back to CDP capture for likes...");
+      likes = await captureAllLikesViaCDP(sess, userId);
     }
 
     const seen = new Set();
@@ -690,7 +692,7 @@ async function fetchLikesGraphQL(sess, queryId, userId, cookieStr, ct0, bearerTo
       features: JSON.stringify(GRAPHQL_FEATURES),
     });
 
-    const url = `https://x.com/i/api/graphql/${queryId}/Likes?${params}`;
+    const url = `https://x.com/i/api/graphql/${queryId}/LikedTweets?${params}`;
     console.log(`[Electron] Fetching likes page ${page} for userId=${userId}, cursor=${cursor ? cursor.substring(0, 20) + "…" : "null"}`);
 
     const response = await sess.fetch(url, { method: "GET", headers });
@@ -720,6 +722,123 @@ async function fetchLikesGraphQL(sess, queryId, userId, cookieStr, ct0, bearerTo
   }
 
   return allLikes;
+}
+
+async function discoverLikesQueryId(sess, cookieStr) {
+  try {
+    console.log("[Electron] Discovering LikedTweets query ID from JS bundles...");
+    const homeRes = await sess.fetch("https://x.com/", {
+      headers: {
+        "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        cookie: cookieStr,
+        accept: "text/html,application/xhtml+xml",
+      },
+    });
+    const html = await homeRes.text();
+    const scriptUrls = [...new Set(
+      (html.match(/https:\/\/abs\.twimg\.com\/responsive-web\/client-web\/[^"']+\.js/g) || [])
+    )].slice(0, 10);
+
+    for (const scriptUrl of scriptUrls) {
+      try {
+        const res = await sess.fetch(scriptUrl, {
+          headers: { "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
+        });
+        const js = await res.text();
+        const patterns = [
+          /queryId:"([A-Za-z0-9_-]{20,})",operationName:"LikedTweets"/,
+          /"queryId":"([A-Za-z0-9_-]{20,})","operationName":"LikedTweets"/,
+        ];
+        for (const p of patterns) {
+          const m = js.match(p);
+          if (m && m[1]) {
+            console.log(`[Electron] Found LikedTweets query ID: ${m[1]}`);
+            return m[1];
+          }
+        }
+      } catch (_) {}
+    }
+  } catch (e) {
+    console.error("[Electron] discoverLikesQueryId error:", e.message);
+  }
+  return null;
+}
+
+async function captureAllLikesViaCDP(sess, userId) {
+  return new Promise((resolve) => {
+    console.log(`[Electron] CDP capture: loading likes page for userId=${userId}...`);
+
+    const win = new BrowserWindow({
+      width: 1280, height: 900, show: false,
+      webPreferences: { nodeIntegration: false, contextIsolation: true, session: sess },
+    });
+
+    const allLikes = [];
+    const seenIds = new Set();
+    let resolved = false;
+    let scrollInterval = null;
+    let stableCount = 0;
+    let lastCount = 0;
+
+    const finish = (reason) => {
+      if (resolved) return;
+      resolved = true;
+      clearInterval(scrollInterval);
+      clearTimeout(hardTimeout);
+      try { win.webContents.debugger.detach(); } catch (_) {}
+      win.destroy();
+      console.log(`[Electron] CDP likes done (${reason}): ${allLikes.length} total`);
+      resolve(allLikes);
+    };
+
+    const hardTimeout = setTimeout(() => finish("timeout"), 90000);
+
+    try { win.webContents.debugger.attach("1.3"); }
+    catch (e) { console.error("[Electron] CDP attach failed:", e.message); resolve([]); return; }
+
+    win.webContents.debugger.on("message", async (_event, method, params) => {
+      if (method !== "Network.responseReceived") return;
+      const url = params.response?.url || "";
+      if (!url.includes("/LikedTweets") || !url.includes("/graphql/")) return;
+
+      const qm = url.match(/graphql\/([^/?]+)\/LikedTweets/);
+      if (qm) capturedLikesQueryId = qm[1];
+
+      const auth = params.response?.requestHeaders?.authorization || params.response?.requestHeaders?.Authorization;
+      if (auth?.startsWith("Bearer ")) capturedBearerToken = auth;
+
+      try {
+        const body = await win.webContents.debugger.sendCommand("Network.getResponseBody", { requestId: params.requestId });
+        const raw = body.base64Encoded ? Buffer.from(body.body, "base64").toString("utf8") : body.body;
+        if (!raw) return;
+        const data = JSON.parse(raw);
+        const { bookmarks: pageLikes } = parseGraphQLLikes(data, allLikes.length);
+        let added = 0;
+        for (const like of pageLikes) {
+          if (!seenIds.has(like.id)) { seenIds.add(like.id); allLikes.push(like); added++; }
+        }
+        console.log(`[Electron] CDP likes intercepted: +${added} (total=${allLikes.length})`);
+      } catch (e) { console.error("[Electron] CDP likes body error:", e.message); }
+    });
+
+    win.webContents.debugger.sendCommand("Network.enable").catch(console.error);
+
+    win.webContents.on("did-finish-load", () => {
+      scrollInterval = setInterval(async () => {
+        if (resolved) return;
+        try { await win.webContents.executeJavaScript("window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'smooth' })"); } catch (_) {}
+        const current = allLikes.length;
+        if (current === lastCount) {
+          stableCount++;
+          if ((stableCount >= 8 && current > 0) || stableCount >= 15) finish("stable");
+        } else { stableCount = 0; lastCount = current; }
+      }, 1500);
+    });
+
+    win.on("closed", () => finish("window-closed"));
+    // Load the user's own likes page
+    win.webContents.loadURL(`https://x.com/i/likes`);
+  });
 }
 
 function parseGraphQLLikes(data, startIdx = 0) {
