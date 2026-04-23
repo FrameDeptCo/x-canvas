@@ -466,18 +466,19 @@ ipcMain.handle("fetch-likes", async (_, cookie, username) => {
 ipcMain.handle("bookmark-tweets-batch", async (_, tweetIds, username) => {
   console.log(`[Electron] Bookmarking ${tweetIds.length} tweets via in-page fetch`);
 
+  const sess = mainWindow ? mainWindow.webContents.session : electronSession.defaultSession;
+
+  // Grab session cookies before creating the window
+  const sessionCookies = await sess.cookies.get({ url: "https://x.com" });
+  const ct0 = sessionCookies.find(c => c.name === "ct0")?.value || "";
+  const bearer = capturedBearerToken || "Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA";
+  const createBmQid = capturedCreateBookmarkQueryId || "aoDbu3RHznuiSkQ9aNM67Q";
+
   return new Promise((resolve) => {
-    const sess = mainWindow ? mainWindow.webContents.session : electronSession.defaultSession;
     const win = new BrowserWindow({
       width: 1280, height: 900, show: false,
       webPreferences: { nodeIntegration: false, contextIsolation: false, session: sess },
     });
-
-    // Grab session cookies for ct0 and bearer before page load
-    const sessionCookies = await sess.cookies.get({ url: "https://x.com" });
-    const ct0 = sessionCookies.find(c => c.name === "ct0")?.value || "";
-    const bearer = capturedBearerToken || "Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA";
-    const createBmQid = capturedCreateBookmarkQueryId || "aoDbu3RHznuiSkQ9aNM67Q";
 
     win.webContents.once("did-finish-load", async () => {
       try {
