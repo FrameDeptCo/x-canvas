@@ -66,6 +66,11 @@ export async function syncBookmarks(onProgress, testMode = false) {
     const { bookmarks, collections } = result.data
     console.log('[Sync] Received bookmarks:', bookmarks)
 
+    // Debug: show first 5 authors so we can see what's being captured
+    console.log('[Sync] First 5 authors:',
+      bookmarks.slice(0, 5).map(b => ({ id: b.id, author: b.author, authorName: b.authorName }))
+    )
+
     onProgress?.(`Processing ${bookmarks.length} bookmarks...`)
 
     // Filter to media-only (images/videos) — text-only bookmarks don't display
