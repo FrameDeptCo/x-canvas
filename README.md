@@ -2,6 +2,10 @@
 
 An Electron desktop app that syncs your X.com bookmarks **& likes** and displays them beautifully on an infinite, draggable canvas.
 
+<div align="center">
+  <img src="https://github.com/FrameDeptCo/x-canvas/raw/main/gif/claude-keeper.gif" alt="Claude's Keeper Demo" width="600">
+</div>
+
 ## Features
 
 - 🔖 **Sync Bookmarks** — Import all your X.com bookmarks onto the canvas
