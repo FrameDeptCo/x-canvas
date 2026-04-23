@@ -1215,25 +1215,23 @@ function parseGraphQLBookmarks(data, startIdx = 0) {
             const legacy = tweetData?.legacy;
             if (!legacy) continue;
 
-            // ── Debug: log structure for first 3 tweets so we can see actual API paths ──
-            if (bookmarks.length < 3) {
-              const _ur = tweetData?.core?.user_results?.result
-                       || tweetResult?.core?.user_results?.result;
-              console.log(`[Debug tweet#${bookmarks.length}]`,
-                'typename:', tweetResult?.__typename,
-                '| tweetData keys:', Object.keys(tweetData || {}).join(','),
-                '| has core:', !!tweetData?.core,
-                '| has core.user_results:', !!tweetData?.core?.user_results,
-                '| userResult typename:', _ur?.__typename,
-                '| userResult keys:', Object.keys(_ur || {}).join(','),
-                '| screen_name:', _ur?.legacy?.screen_name || _ur?.screen_name || '(none)',
-              );
-            }
-
             const userResult =
               tweetData?.core?.user_results?.result ||
               tweetResult?.core?.user_results?.result ||
               tweetData?.tweet?.core?.user_results?.result;
+
+            // ── Debug: show what's inside userResult.legacy and userResult.core ──
+            if (bookmarks.length < 2) {
+              const _ur = userResult;
+              console.log(`[Debug tweet#${bookmarks.length}]`,
+                '| userResult.legacy keys:', Object.keys(_ur?.legacy || {}).join(','),
+                '| userResult.core keys:', Object.keys(_ur?.core || {}).join(','),
+                '| legacy.screen_name:', _ur?.legacy?.screen_name || '(none)',
+                '| core.screen_name:', _ur?.core?.screen_name || '(none)',
+                '| core.user_name:', _ur?.core?.user_name || '(none)',
+                '| core.name:', _ur?.core?.name || '(none)',
+              );
+            }
 
             // Safely unwrap – skip UserUnavailable (suspended/blocked accounts)
             // Fall through to `userResult` itself as legacy if __typename is absent/unknown
@@ -1243,15 +1241,28 @@ function parseGraphQLBookmarks(data, startIdx = 0) {
               ? null
               : userResult?.legacy || userResult;
 
-            let screenName = userLegacy?.screen_name || "";
+            // X.com moved screen_name from legacy → core in 2025 API
+            let screenName =
+              userLegacy?.screen_name ||        // old path: legacy.screen_name
+              userResult?.core?.screen_name ||  // new path: core.screen_name
+              userResult?.core?.user_name ||    // alt new path: core.user_name
+              "";
 
             // Fallback for retweets: extract @handle from "RT @handle: …" prefix
             if (!screenName && legacy.full_text?.startsWith("RT @")) {
               const rtM = legacy.full_text.match(/^RT @([A-Za-z0-9_]+):/);
               if (rtM) screenName = rtM[1];
             }
-            const displayName = userLegacy?.name || userResult?.name || screenName || "Unknown";
-            const authorImage = userLegacy?.profile_image_url_https || userResult?.profile_image_url_https || null;
+            const displayName =
+              userLegacy?.name ||
+              userResult?.core?.name ||         // new path: core.name
+              userResult?.name ||
+              screenName || "Unknown";
+            const authorImage =
+              userLegacy?.profile_image_url_https ||
+              userResult?.core?.profile_image_url_https ||  // new path
+              userResult?.profile_image_url_https ||
+              null;
 
             const mediaEntities = legacy.extended_entities?.media || legacy.entities?.media || [];
             const firstMedia = mediaEntities[0] || null;
